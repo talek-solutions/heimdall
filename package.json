@@ -1,0 +1,26 @@
+{
+  "name": "heimdall",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Observability RCA harness",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "workspaces": [
+    "libs/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"**/dist/**/*.spec.js\"",
+    "clean": "rm -rf dist libs/*/dist apps/*/dist",
+    "heimdall": "node apps/cli/dist/heimdall.js"
+  },
+  "devDependencies": {
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.16.2",
+    "@types/node": "^24.13.4",
+    "typescript": "^7.0.2"
+  }
+}

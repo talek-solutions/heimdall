@@ -1,0 +1,25 @@
+{
+  "name": "@heimdall/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./src/config/index.ts",
+      "default": "./dist/config/index.js"
+    }
+  },
+  "scripts": {
+    "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
+  },
+  "dependencies": {
+    "@heimdall/core": "^0.0.0",
+    "@nestjs/common": "^11.2.3",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.2"
+  }
+}
