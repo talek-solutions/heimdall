@@ -1,12 +1,27 @@
 {
-  "name": "llm",
-  "version": "1.0.0",
-  "description": "",
-  "license": "ISC",
-  "author": "",
-  "type": "commonjs",
-  "main": "index.js",
+  "name": "@heimdall/llm",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./anthropic": {
+      "types": "./src/anthropic.ts",
+      "default": "./dist/anthropic.js"
+    }
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
+  },
+  "dependencies": {
+    "@heimdall/core": "^0.0.0",
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/config": "^12.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.3"
   }
 }

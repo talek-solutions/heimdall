@@ -6,6 +6,7 @@ export enum AnthropicMessageRole {
 
 export enum AnthropicMessageType {
     MESSAGE = 'message',
+    ERROR = 'error',
 }
 
 export enum AnthropicContentBlockType {

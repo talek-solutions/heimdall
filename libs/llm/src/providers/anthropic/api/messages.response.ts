@@ -2,7 +2,6 @@
  * Anthropic Messages API response body (the `Message` object).
  */
 
-import { AnthropicModel } from '../anthropic.enums';
 import {
     AnthropicMessageRole,
     AnthropicMessageType,
@@ -23,7 +22,8 @@ export interface AnthropicMessagesResponse {
     type: AnthropicMessageType;
     role: AnthropicMessageRole.ASSISTANT;
     content: AnthropicContentBlock[];
-    model: AnthropicModel;
+    /** Server data; deliberately not constrained to `AnthropicModel`. */
+    model: string;
     stopReason: AnthropicStopReason | null;
     stopSequence: string | null;
     stopDetails: AnthropicStopDetails | null;

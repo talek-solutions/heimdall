@@ -4,6 +4,7 @@ import { CommandFactory } from 'nest-commander';
 import { ExitCode } from '@heimdall/core';
 import { CliModule } from './cli.module';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
+import { exitCodeForError, toErrorResponse } from './errors/error-exit.mapper';
 import { writeDiagnostic } from './presentation/streams';
 import { version } from './version';
 
@@ -20,6 +21,8 @@ async function bootstrap(): Promise<void> {
     // Nest's bootstrap logger writes to stdout, which would corrupt `--json`.
     // Diagnostics go through Streams (stderr) instead. See .docs/adr/0006.
     logger: false,
+    // The default (true) exits 1 on a throwing factory, bypassing the exit-code contract.
+    abortOnError: false,
     errorHandler: (error: Error): void => {
       process.exit(contract?.resolve(error) ?? ExitCode.Unexpected);
     },
@@ -32,7 +35,7 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  writeDiagnostic(`heimdall: ${message}\n`);
-  process.exitCode = ExitCode.Unexpected;
+  const { errorCode, message } = toErrorResponse(error);
+  writeDiagnostic(`heimdall: ${errorCode}${message === undefined ? '' : `: ${message}`}\n`);
+  process.exitCode = exitCodeForError(error);
 });

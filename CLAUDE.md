@@ -38,6 +38,7 @@ If something is unclear, stop. Name what's confusing. Ask.
 
 ### Typescript
 - You are to use enums compared to literal strings or raw values
+- Do NOT over comment the code. Use them sparingly and where impact is big enough or you need me to understand a point you are making.
 
 ### Git
 - You will not add your signature to any commits

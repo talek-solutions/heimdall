@@ -21,10 +21,14 @@ export interface AnthropicMessageParam {
 
 export type AnthropicSystemPrompt = string | AnthropicTextBlock[];
 
+/** JSON Schema; the index signature keeps arbitrary keywords expressible. */
 export interface AnthropicToolInputSchema {
     type: 'object';
-    properties: Record<string, unknown>;
+    properties?: Record<string, unknown>;
     required?: string[];
+    /** Must be `false` when `strict` is set on the tool. */
+    additionalProperties?: boolean;
+    [keyword: string]: unknown;
 }
 
 export interface AnthropicToolDefinition {

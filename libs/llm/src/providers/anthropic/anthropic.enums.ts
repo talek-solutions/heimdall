@@ -1,10 +1,12 @@
 /**
  * General Anthropic enums not tied to a specific API type.
- * API-type-specific enums live under `interfaces/<interfaces-type>.enums.ts`.
+ * API-type-specific enums live under `api/<api-type>.enums.ts`.
  */
 
 export enum AnthropicModel {
     FABLE_5 = 'claude-fable-5',
+    OPUS_5 = 'claude-opus-5',
+    SONNET_5 = 'claude-sonnet-5',
     OPUS_4_8 = 'claude-opus-4-8',
     OPUS_4_7 = 'claude-opus-4-7',
     OPUS_4_6 = 'claude-opus-4-6',
@@ -13,5 +15,5 @@ export enum AnthropicModel {
 }
 
 export enum AnthropicApiEndpoints {
-    MESSAGES = '/v1/messages'
+    MESSAGES = '/v1/messages',
 }

@@ -12,11 +12,23 @@ interface Invocation {
   readonly stderr: string;
 }
 
+/** Pinned so a developer's local `.env` cannot change what these specs observe. */
+const BASE_ENV: NodeJS.ProcessEnv = {
+  PATH: process.env['PATH'],
+  PREFERRED_LLM_PROVIDER: '',
+  ANTHROPIC_API_KEY: '',
+};
+
 function invoke(...args: string[]): Invocation {
+  return invokeWith({}, ...args);
+}
+
+function invokeWith(env: NodeJS.ProcessEnv, ...args: string[]): Invocation {
   try {
     const stdout = execFileSync(process.execPath, [ENTRY, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...BASE_ENV, ...env },
     });
     return { status: 0, stdout, stderr: '' };
   } catch (error) {
@@ -55,6 +67,24 @@ describe('exit-code contract (end to end)', () => {
     // default exit(1); ExitCodeContract is what brings it back to the contract.
     assert.equal(invoke('--nope').status, ExitCode.Usage);
     assert.equal(invoke('version', '--nope').status, ExitCode.Usage);
+  });
+});
+
+describe('LLM provider wiring (end to end)', () => {
+  it('runs commands that never call the LLM without any credentials', () => {
+    assert.equal(invoke('version').status, ExitCode.Success);
+  });
+
+  it('exits Usage with the error code when PREFERRED_LLM_PROVIDER is unknown', () => {
+    const { status, stdout, stderr } = invokeWith(
+      { PREFERRED_LLM_PROVIDER: 'bogus' },
+      'version',
+    );
+
+    assert.equal(status, ExitCode.Usage);
+    assert.equal(stdout, '');
+    assert.match(stderr, /LLM_INVALID_PROVIDER/);
+    assert.match(stderr, /bogus/);
   });
 });
 

@@ -1,83 +1,108 @@
+import { LlmError, LlmErrorCode } from '../errors';
+
 export interface LlmApiClientConfig {
-    apiUrl: string;
+    /** Origin plus any path prefix, e.g. `https://proxy.internal/anthropic`. */
+    readonly apiUrl: string;
+    readonly fetchFn?: typeof fetch;
 }
 
 export interface LlmApiRequestOptions {
-    path: string;
-    headers?: Record<string, string>;
-    body?: Record<string, string>;
-    query?: Record<string, string>;
+    readonly path: string;
+    readonly headers?: Record<string, string>;
+    readonly body?: unknown;
+    readonly signal?: AbortSignal;
 }
 
-class LlmApiClient {
-    private readonly apiUrl: string;
+const CONTENT_TYPE_HEADER = 'content-type';
+const JSON_CONTENT_TYPE = 'application/json';
 
-    constructor(apiClientConfig: LlmApiClientConfig) {
-        this.apiUrl = apiClientConfig.apiUrl;
+/** JSON over native `fetch` (ADR 0003). Every failure is a thrown `LlmError`. */
+export class LlmApiClient {
+    private readonly apiUrl: string;
+    private readonly fetchFn: typeof fetch;
+
+    constructor(config: LlmApiClientConfig) {
+        // Not `new URL(path, apiUrl)`: that drops a path prefix on the base.
+        this.apiUrl = config.apiUrl.replace(/\/+$/, '');
+        this.fetchFn = config.fetchFn ?? ((input, init) => fetch(input, init));
     }
 
-    public async post<TResponse = unknown, TError = {
-        error: Record<string, unknown>
-    }>(options: LlmApiRequestOptions): Promise<TResponse | TError> {
-        const headers = this.transformDefaultHeaders(options.headers);
-        let contentType: string | undefined;
-        if (headers) {
-            contentType = headers['content-type'];
+    public async post<TResponse>(options: LlmApiRequestOptions): Promise<TResponse> {
+        const url = `${this.apiUrl}${options.path}`;
+        const headers = this.withDefaultContentType(options.headers);
+
+        let response: Response;
+        try {
+            response = await this.fetchFn(url, {
+                method: 'POST',
+                headers,
+                ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+                ...(options.signal !== undefined ? { signal: options.signal } : {}),
+            });
+        } catch (error) {
+            throw new LlmError(
+                LlmErrorCode.NETWORK_ERROR,
+                `POST ${url} failed before a response was received`,
+                { cause: error },
+            );
+        }
+
+        if (!response.ok) {
+            throw await this.toStatusError(response, url);
         }
 
         try {
-            const url = new URL(options.path, this.apiUrl);
-            const response = await fetch(url.toString(), {
-                method: 'POST',
-                headers,
-                body: this.transformRequestBody(options?.body, contentType)
-            });
-
-            const json = await response.json();
-
-            return json as TResponse;
+            return (await response.json()) as TResponse;
         } catch (error) {
-            return {
-                error: {
-                    message: "Unable to parse JSON",
-                }
-            } as TError;
+            throw new LlmError(
+                LlmErrorCode.INVALID_RESPONSE,
+                `POST ${url} returned ${response.status} with a non-JSON body`,
+                { cause: error },
+            );
         }
     }
 
-    private transformDefaultHeaders(headers?: Record<string, string>) {
-        const headerKeys = Object.keys(headers ?? {});
-        if (headerKeys.length > 0) {
-            if (!headerKeys
-                .map(h => h.toLowerCase())
-                .includes('content-type')
-            ) {
-                return {
-                    ...headers,
-                    'content-type': 'application/json'
-                }
-            }
+    private withDefaultContentType(
+        headers: Record<string, string> | undefined,
+    ): Record<string, string> {
+        const hasContentType = Object.keys(headers ?? {}).some(
+            (name) => name.toLowerCase() === CONTENT_TYPE_HEADER,
+        );
+        if (hasContentType) {
             return headers ?? {};
         }
+        return { ...headers, [CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE };
+    }
 
-        return {
-            'content-type': 'application/json',
+    private async toStatusError(response: Response, url: string): Promise<LlmError> {
+        const body: unknown = await response.json().catch(() => undefined);
+        const detail = this.readErrorMessage(body);
+        const message = `POST ${url} returned ${response.status}${detail === undefined ? '' : `: ${detail}`}`;
+
+        switch (response.status) {
+            case 401:
+            case 403:
+                return new LlmError(LlmErrorCode.AUTHENTICATION_FAILED, message);
+            case 429:
+                return new LlmError(LlmErrorCode.RATE_LIMITED, message);
+            default:
+                return new LlmError(LlmErrorCode.REQUEST_FAILED, message);
         }
     }
 
-    private transformRequestBody(
-        body?: Record<string, string>,
-        contentType?: string
-    ): string | null {
-        if (!body) {
-            return null;
+    /** Anthropic: `{ error: { message } }`; others commonly top-level `message`. */
+    private readErrorMessage(body: unknown): string | undefined {
+        if (typeof body !== 'object' || body === null) {
+            return undefined;
         }
-
-        switch (contentType) {
-            case 'application/json':
-                return JSON.stringify(body);
-            default:
-                return JSON.stringify(body);
+        const record = body as Record<string, unknown>;
+        const nested = record['error'];
+        if (typeof nested === 'object' && nested !== null) {
+            const nestedMessage = (nested as Record<string, unknown>)['message'];
+            if (typeof nestedMessage === 'string') {
+                return nestedMessage;
+            }
         }
+        return typeof record['message'] === 'string' ? record['message'] : undefined;
     }
 }
