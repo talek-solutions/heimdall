@@ -1,5 +1,5 @@
 {
-  "name": "@heimdall/telemetry",
+  "name": "@heimdall/config",
   "version": "0.0.0",
   "private": true,
   "main": "./dist/index.js",
@@ -13,6 +13,12 @@
     "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
   },
   "dependencies": {
-    "@heimdall/core": "^0.0.0"
+    "@heimdall/core": "^0.0.0",
+    "@heimdall/telemetry": "^0.0.0",
+    "@nestjs/common": "^11.2.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "reflect-metadata": "^0.2.2",
+    "yaml": "^2.9.1"
   }
 }

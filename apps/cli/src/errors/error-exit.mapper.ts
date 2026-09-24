@@ -1,6 +1,6 @@
 import { ExitCode, isHeimdallError, type ErrorResponse } from '@heimdall/core';
 import { LlmErrorCode } from '@heimdall/llm';
-import { ConfigErrorCode } from '@heimdall/telemetry';
+import { ConfigErrorCode } from '@heimdall/config';
 import { CliErrorCode } from './cli-error-code.enum';
 
 /**

@@ -1,0 +1,3 @@
+export const HEIMDALL_CONFIG_PATH = Symbol('HEIMDALL_CONFIG_PATH');
+
+export const HEIMDALL_CONFIG = Symbol('HEIMDALL_CONFIG');

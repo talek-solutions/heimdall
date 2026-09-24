@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LlmModule } from '@heimdall/llm';
-import { ConfigLoader } from '@heimdall/telemetry';
+import { HeimdallConfigModule } from '@heimdall/config';
 import { ConfigCommand } from './commands/config/config.command';
 import { VersionCommand } from './commands/version/version.command';
 import { CliConfigService } from './config/cli-config.service';
@@ -16,14 +16,7 @@ import { Streams } from './presentation/streams';
 @Module({
   // forRoot() runs when this file is imported, so `.env` is in process.env
   // before any provider factory executes. Existing variables win over the file.
-  imports: [ConfigModule.forRoot({ isGlobal: true }), LlmModule],
-  providers: [
-    Streams,
-    ExitCodeContract,
-    ConfigLoader,
-    CliConfigService,
-    ConfigCommand,
-    VersionCommand,
-  ],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), LlmModule, HeimdallConfigModule],
+  providers: [Streams, ExitCodeContract, CliConfigService, ConfigCommand, VersionCommand],
 })
 export class CliModule {}

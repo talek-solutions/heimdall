@@ -41,3 +41,4 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0010](0010-no-tui-in-scope.md) | No terminal UI in scope | Accepted |
 | [0011](0011-commonjs-and-npm-workspaces.md) | CommonJS output and npm workspaces | Accepted |
 | [0012](0012-no-eslint-until-typescript-eslint-supports-ts7.md) | Stream discipline enforced by a guard test | Accepted |
+| [0013](0013-user-level-kubeconfig-style-config.md) | User-level, kubeconfig-style configuration | Accepted |

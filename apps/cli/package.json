@@ -9,6 +9,7 @@
     "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
   },
   "dependencies": {
+    "@heimdall/config": "^0.0.0",
     "@heimdall/core": "*",
     "@heimdall/llm": "^0.0.0",
     "@heimdall/telemetry": "^0.0.0",

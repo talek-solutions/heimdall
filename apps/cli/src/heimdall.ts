@@ -5,7 +5,8 @@ import { ExitCode } from '@heimdall/core';
 import { CliModule } from './cli.module';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
 import { exitCodeForError, toErrorResponse } from './errors/error-exit.mapper';
-import { writeDiagnostic } from './presentation/streams';
+import { argvRequestsMachineOutput } from './errors/machine-output';
+import { writeData, writeDiagnostic } from './presentation/streams';
 import { version } from './version';
 
 async function bootstrap(): Promise<void> {
@@ -34,8 +35,15 @@ async function bootstrap(): Promise<void> {
   await app.close();
 }
 
+// A provider threw at bootstrap, so HeimdallCommand never ran; apply its output contract here.
 void bootstrap().catch((error: unknown) => {
-  const { errorCode, message } = toErrorResponse(error);
-  writeDiagnostic(`heimdall: ${errorCode}${message === undefined ? '' : `: ${message}`}\n`);
+  const response = toErrorResponse(error);
+
+  if (argvRequestsMachineOutput(process.argv.slice(2))) {
+    writeData(`${JSON.stringify(response)}\n`);
+  } else {
+    const detail = response.message === undefined ? '' : `: ${response.message}`;
+    writeDiagnostic(`heimdall: ${response.errorCode}${detail}\n`);
+  }
   process.exitCode = exitCodeForError(error);
 });

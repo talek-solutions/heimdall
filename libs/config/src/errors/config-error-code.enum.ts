@@ -4,4 +4,6 @@ export enum ConfigErrorCode {
   ConfigParseFailed = 'CONFIG_PARSE_FAILED',
   ConfigInvalid = 'CONFIG_INVALID',
   ConfigUnsupportedVersion = 'CONFIG_UNSUPPORTED_VERSION',
+  ConfigContextNotFound = 'CONFIG_CONTEXT_NOT_FOUND',
+  ConfigWriteFailed = 'CONFIG_WRITE_FAILED',
 }

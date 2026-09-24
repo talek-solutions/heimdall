@@ -37,3 +37,6 @@ against a known stack (0009).
 data *means* — fetching logs is the easy half, and a raw text blob produces markedly worse
 RCA than typed, semantically-labelled fields. The mapping is also what the egress
 allowlist keys off (0008), so it is load-bearing twice over.
+
+**Follow-up (0013):** backends moved to the user-level config as aliased `sources`; queries
+will live in a separate config that references those aliases.

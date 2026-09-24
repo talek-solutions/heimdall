@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { ExitCode } from '@heimdall/core';
+import { ConfigErrorCode, ConfigEnvVariable } from '@heimdall/config';
 
 const ENTRY = path.join(__dirname, '..', 'heimdall.js');
+const workspace = mkdtempSync(path.join(os.tmpdir(), 'heimdall-exit-code-'));
+
+after(() => {
+  rmSync(workspace, { recursive: true, force: true });
+});
 
 interface Invocation {
   readonly status: number;
@@ -12,9 +20,13 @@ interface Invocation {
   readonly stderr: string;
 }
 
-/** Pinned so a developer's local `.env` cannot change what these specs observe. */
+/**
+ * Pinned so a developer's local `.env` cannot change what these specs observe, and
+ * HOME is a throwaway so the default ~/.heimdall/config.yaml is never the real one.
+ */
 const BASE_ENV: NodeJS.ProcessEnv = {
   PATH: process.env['PATH'],
+  HOME: workspace,
   PREFERRED_LLM_PROVIDER: '',
   ANTHROPIC_API_KEY: '',
 };
@@ -76,15 +88,28 @@ describe('LLM provider wiring (end to end)', () => {
   });
 
   it('exits Usage with the error code when PREFERRED_LLM_PROVIDER is unknown', () => {
-    const { status, stdout, stderr } = invokeWith(
-      { PREFERRED_LLM_PROVIDER: 'bogus' },
-      'version',
-    );
+    const { status, stdout, stderr } = invokeWith({ PREFERRED_LLM_PROVIDER: 'bogus' }, 'version');
 
     assert.equal(status, ExitCode.Usage);
     assert.equal(stdout, '');
     assert.match(stderr, /LLM_INVALID_PROVIDER/);
     assert.match(stderr, /bogus/);
+  });
+});
+
+describe('config loading (end to end)', () => {
+  it('fails every command fast with Usage when the config is invalid', () => {
+    // Deliberate: the config is injected at bootstrap, like kubectl with a broken kubeconfig.
+    const file = path.join(workspace, 'broken.yaml');
+    writeFileSync(file, 'version: 1\nkind: Nope\n', 'utf8');
+    const { status, stdout, stderr } = invokeWith(
+      { [ConfigEnvVariable.ConfigPath]: file },
+      'version',
+    );
+
+    assert.equal(status, ExitCode.Usage);
+    assert.equal(stdout, '');
+    assert.match(stderr, new RegExp(ConfigErrorCode.ConfigInvalid));
   });
 });
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ExitCode } from '@heimdall/core';
 import { LlmError, LlmErrorCode } from '@heimdall/llm';
-import { ConfigError, ConfigErrorCode } from '@heimdall/telemetry';
+import { ConfigError, ConfigErrorCode } from '@heimdall/config';
 import { CliError } from './cli.error';
 import { CliErrorCode } from './cli-error-code.enum';
 import { exitCodeForError, toErrorResponse } from './error-exit.mapper';

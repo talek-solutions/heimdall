@@ -2,12 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { LogLevel, OutputFormat } from '@heimdall/core';
 import { CliError, CliErrorCode } from '../errors';
-import {
-  DEFAULT_CONFIG_FILENAME,
-  ENV,
-  resolveCliConfig,
-  type ResolveInput,
-} from './cli-config.resolver';
+import { ENV, resolveCliConfig, type ResolveInput } from './cli-config.resolver';
 
 function resolve(overrides: Partial<ResolveInput> = {}) {
   return resolveCliConfig({
@@ -19,25 +14,6 @@ function resolve(overrides: Partial<ResolveInput> = {}) {
 }
 
 describe('resolveCliConfig precedence', () => {
-  describe('config path', () => {
-    it('falls back to the built-in default', () => {
-      assert.equal(resolve().configPath, DEFAULT_CONFIG_FILENAME);
-    });
-
-    it('prefers env over the default', () => {
-      const config = resolve({ env: { [ENV.ConfigPath]: '/etc/heimdall.yaml' } });
-      assert.equal(config.configPath, '/etc/heimdall.yaml');
-    });
-
-    it('prefers the flag over env', () => {
-      const config = resolve({
-        flags: { config: './local.yaml' },
-        env: { [ENV.ConfigPath]: '/etc/heimdall.yaml' },
-      });
-      assert.equal(config.configPath, './local.yaml');
-    });
-  });
-
   describe('output format', () => {
     it('defaults to text', () => {
       assert.equal(resolve().outputFormat, OutputFormat.Text);
@@ -74,8 +50,7 @@ describe('resolveCliConfig precedence', () => {
       assert.throws(
         () => resolve({ flags: { json: true, ndjson: true } }),
         (error: unknown) =>
-          error instanceof CliError &&
-          error.errorCode === CliErrorCode.ConflictingOutputFormats,
+          error instanceof CliError && error.errorCode === CliErrorCode.ConflictingOutputFormats,
       );
     });
 
@@ -83,8 +58,7 @@ describe('resolveCliConfig precedence', () => {
       assert.throws(
         () => resolve({ env: { [ENV.Output]: 'yaml' } }),
         (error: unknown) =>
-          error instanceof CliError &&
-          error.errorCode === CliErrorCode.InvalidEnvironmentValue,
+          error instanceof CliError && error.errorCode === CliErrorCode.InvalidEnvironmentValue,
       );
     });
   });
@@ -116,8 +90,7 @@ describe('resolveCliConfig precedence', () => {
       assert.throws(
         () => resolve({ flags: { verbose: true, quiet: true } }),
         (error: unknown) =>
-          error instanceof CliError &&
-          error.errorCode === CliErrorCode.ConflictingVerbosity,
+          error instanceof CliError && error.errorCode === CliErrorCode.ConflictingVerbosity,
       );
     });
   });
@@ -164,10 +137,7 @@ describe('resolveCliConfig precedence', () => {
     });
 
     it('is suppressed when logging is silenced', () => {
-      assert.equal(
-        resolve({ env: { [ENV.LogLevel]: LogLevel.Silent } }).showBanner,
-        false,
-      );
+      assert.equal(resolve({ env: { [ENV.LogLevel]: LogLevel.Silent } }).showBanner, false);
     });
   });
 });
