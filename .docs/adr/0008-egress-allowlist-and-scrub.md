@@ -61,3 +61,20 @@ auth:
 
 There is no field anywhere in the schema that accepts a credential value, so the
 mistake cannot be made rather than being caught by review.
+
+## Amendment (2026-09-25): connectors exported ahead of the redacting source
+
+The Loki, Prometheus and Tempo connectors ship before the `TelemetrySource` that applies the
+field-mapping allowlist and scrubbers. To be usable now they are exported from the
+`@heimdall/telemetry/connectors` subpath, and their results are **not redacted**.
+
+**This temporarily suspends the structural guarantee above.** Until the redacting source
+exists, nothing but convention stops a caller from handing raw log lines, span attributes
+or label values to the model. The subpath (rather than the root index) keeps the raw
+surface opt-in and greppable: every import of `@heimdall/telemetry/connectors` outside
+`libs/telemetry` is a place raw data can escape.
+
+**Close it when** the `TelemetrySource` lands: drop the `./connectors` export (or narrow it
+to types), so the engine again has no way to obtain unredacted data. Until then, no code
+path that sends content to an LLM may consume a connector result directly.
+

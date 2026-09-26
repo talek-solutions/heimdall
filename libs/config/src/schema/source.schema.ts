@@ -10,7 +10,7 @@ import {
   Max,
   ValidateNested,
 } from 'class-validator';
-import { SignalType, TelemetryBackend } from '@heimdall/telemetry';
+import { SignalType, TelemetryBackend } from '../enums';
 import { AUTH_SUBTYPES, AuthConfigBase, NoAuthConfig, type AuthConfig } from './auth.schema';
 import { MetadataConfig, RESOURCE_NAME, RESOURCE_NAME_MESSAGE } from './metadata.schema';
 

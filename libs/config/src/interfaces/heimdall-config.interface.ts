@@ -1,6 +1,12 @@
 import type { LogLevel, OutputFormat } from '@heimdall/core';
-import type { AuthScheme, Scrubber, SignalType, TelemetryBackend } from '@heimdall/telemetry';
-import type { ConfigKind, ConfigVersion } from '../enums';
+import type {
+  AuthScheme,
+  ConfigKind,
+  ConfigVersion,
+  Scrubber,
+  SignalType,
+  TelemetryBackend,
+} from '../enums';
 
 export interface IMetadataConfig {
   readonly description?: string | undefined;

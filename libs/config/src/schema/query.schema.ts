@@ -1,5 +1,5 @@
 import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
-import { FieldSemantic, SignalType } from '@heimdall/telemetry';
+import { FieldSemantic, SignalType } from '../enums';
 import { IsRecord } from './is-record.decorator';
 
 export class QueryConfig {

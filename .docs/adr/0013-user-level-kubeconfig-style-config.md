@@ -37,8 +37,10 @@ A single `~/.heimdall/config.yaml` (macOS only for now), overridable with
 Queries (0005) are **not** in this file; they move to a separate config that references
 source aliases, delivered separately.
 
-It lives in its own lib, `@heimdall/config`, which depends on `@heimdall/telemetry` for
-domain enums and never the reverse. The file is loaded once at bootstrap by
+It lives in its own lib, `@heimdall/config`, which owns the domain enums its schema
+validates (`TelemetryBackend`, `SignalType`, `AuthScheme`, `Scrubber`, `FieldSemantic`) and
+depends on no other domain lib. `@heimdall/telemetry` depends on config, never the reverse
+(see the amendment below). The file is loaded once at bootstrap by
 `HeimdallConfigModule` and injected as
 `HEIMDALL_CONFIG`. If it is missing at the default location, a commented default is
 written (directory `0700`, file `0600`, exclusive create so it is never overwritten). A
@@ -59,3 +61,12 @@ to a temporary directory.
 **Will regret if:** Heimdall runs in CI or on Linux/Windows hosts — the path is
 `os.homedir()`-based with no XDG or Windows handling, and CI would want the file supplied
 explicitly via `HEIMDALL_CONFIG`.
+
+## Amendment (2026-09-25): dependency direction flipped
+
+The first cut had `@heimdall/config` depend on `@heimdall/telemetry` for the enums above.
+That put the config lib *downstream* of the thing it configures: telemetry connectors could
+not take a slice of `ISourceConfig` without a cycle, and had to re-declare an equivalent
+shape kept in sync by convention. The enums moved into `@heimdall/config`; telemetry now
+imports them and reads only `Pick<ISourceConfig, 'url' | 'timeoutMs' | 'auth'>`. Config
+stays a leaf over `@heimdall/core`, so any lib may depend on it.

@@ -7,12 +7,22 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./connectors": {
+      "types": "./src/connectors.ts",
+      "default": "./dist/connectors.js"
     }
   },
   "scripts": {
     "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
   },
   "dependencies": {
-    "@heimdall/core": "^0.0.0"
+    "@heimdall/config": "^0.0.0",
+    "@heimdall/core": "^0.0.0",
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/config": "^12.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.3"
   }
 }

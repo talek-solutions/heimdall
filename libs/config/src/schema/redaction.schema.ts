@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsNotEmpty, IsString, ValidateNested } from 'class-validator';
-import { Scrubber } from '@heimdall/telemetry';
+import { Scrubber } from '../enums';
 
 export class AdditionalPatternConfig {
   @IsString()

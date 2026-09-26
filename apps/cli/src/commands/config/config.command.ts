@@ -4,11 +4,11 @@ import { OutputFormat } from '@heimdall/core';
 import {
   HEIMDALL_CONFIG,
   HEIMDALL_CONFIG_PATH,
+  TelemetryBackend,
   resolveActiveContext,
   type IHeimdallConfig,
   type ISourceConfig,
 } from '@heimdall/config';
-import { TelemetryBackend } from '@heimdall/telemetry';
 import { CliConfigService } from '../../config/cli-config.service';
 import type { CliFlags } from '../../config/cli-config.model';
 import { Streams } from '../../presentation/streams';

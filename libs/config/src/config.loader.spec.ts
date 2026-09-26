@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AuthScheme, Scrubber, SignalType, TelemetryBackend } from '@heimdall/telemetry';
+import { AuthScheme, Scrubber, SignalType, TelemetryBackend } from './enums';
 import { ConfigError, ConfigErrorCode } from './errors';
 import { ConfigLoader } from './config.loader';
 import { ConfigV1Parser } from './parsers/v1/config-v1.parser';

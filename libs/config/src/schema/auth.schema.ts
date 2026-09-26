@@ -1,5 +1,5 @@
 import { IsEnum, Matches } from 'class-validator';
-import { AuthScheme } from '@heimdall/telemetry';
+import { AuthScheme } from '../enums';
 
 /**
  * An environment variable NAME, never a value.

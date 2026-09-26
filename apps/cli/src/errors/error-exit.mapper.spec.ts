@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { ExitCode } from '@heimdall/core';
 import { LlmError, LlmErrorCode } from '@heimdall/llm';
 import { ConfigError, ConfigErrorCode } from '@heimdall/config';
+import { TelemetryError, TelemetryErrorCode } from '@heimdall/telemetry';
 import { CliError } from './cli.error';
 import { CliErrorCode } from './cli-error-code.enum';
 import { exitCodeForError, toErrorResponse } from './error-exit.mapper';
@@ -34,6 +35,24 @@ describe('exitCodeForError', () => {
     assert.equal(
       exitCodeForError(new LlmError(LlmErrorCode.AUTHENTICATION_FAILED, 'x')),
       ExitCode.ProviderAuth,
+    );
+  });
+
+  it('maps missing or rejected telemetry credentials to ProviderAuth', () => {
+    assert.equal(
+      exitCodeForError(new TelemetryError(TelemetryErrorCode.MissingCredentials, 'x')),
+      ExitCode.ProviderAuth,
+    );
+    assert.equal(
+      exitCodeForError(new TelemetryError(TelemetryErrorCode.AuthenticationFailed, 'x')),
+      ExitCode.ProviderAuth,
+    );
+  });
+
+  it('maps every other telemetry failure to Unexpected', () => {
+    assert.equal(
+      exitCodeForError(new TelemetryError(TelemetryErrorCode.QueryRejected, 'x')),
+      ExitCode.Unexpected,
     );
   });
 
