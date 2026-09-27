@@ -11,7 +11,8 @@
     "./connectors": {
       "types": "./src/connectors.ts",
       "default": "./dist/connectors.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
@@ -20,7 +21,11 @@
     "@heimdall/config": "^0.0.0",
     "@heimdall/core": "^0.0.0",
     "@nestjs/common": "^11.2.3",
-    "@nestjs/config": "^12.0.0"
+    "@nestjs/config": "^12.0.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "reflect-metadata": "^0.2.2",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.2.3"

@@ -1,0 +1,189 @@
+# catalog leaks from 30m (the v2.14.0 deploy) and is OOMKilled every 6h after.
+# Every sawtooth shares the same phase, so heap, GC, latency and errors climb together.
+series:
+  # --- Deploys: the version flips at 30m.
+  - id: catalog_build_info_2_13_4
+    match: 'app_build_info'
+    labels: { service: catalog, namespace: shop, version: 2.13.4 }
+    curve:
+      baseline: 1
+      phases:
+        - { shape: ramp, at: 30m, to: 0, over: 0s }
+  - id: catalog_build_info_2_14_0
+    match: 'app_build_info'
+    labels: { service: catalog, namespace: shop, version: 2.14.0 }
+    curve:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 30m, to: 1, over: 0s }
+  - id: search_build_info
+    match: 'app_build_info'
+    labels: { service: search, namespace: shop, version: 5.2.0 }
+    curve: { baseline: 1 }
+
+  # --- Memory.
+  - id: catalog_jvm_heap_used_bytes
+    match: 'jvm_memory_used_bytes'
+    labels: { service: catalog, namespace: shop, jvm_memory_type: heap }
+    curve:
+      baseline: 700000000
+      noise: { stddev: 25000000 }
+      clamp: { min: 0, max: 3500000000 }
+      phases:
+        - { shape: sawtooth, at: 30m, to: 3480000000, period: 6h }
+  - id: catalog_jvm_heap_max_bytes
+    match: 'jvm_memory_limit_bytes|jvm_memory_max_bytes'
+    labels: { service: catalog, namespace: shop, jvm_memory_type: heap }
+    curve: { baseline: 3500000000 }
+  - id: catalog_container_memory_bytes
+    match: 'container_memory_working_set_bytes|process_resident_memory_bytes'
+    labels: { namespace: shop, service: catalog, container: catalog, pod: catalog-7d9f8b6c4-x2x9q }
+    curve: { ref: catalog_jvm_heap_used_bytes, scale: 1.12, offset: 380000000, clamp: { min: 0, max: 4294967296 } }
+  - id: search_container_memory_bytes
+    match: 'container_memory_working_set_bytes|process_resident_memory_bytes'
+    labels: { namespace: shop, service: search, container: search, pod: search-5c7b9d8f6-k2lqp }
+    curve: { baseline: 1460000000, noise: { stddev: 12000000 }, clamp: { min: 0 } }
+  - id: catalog_memory_limit_bytes
+    match: 'kube_pod_container_resource_limits'
+    labels: { namespace: shop, container: catalog, pod: catalog-7d9f8b6c4-x2x9q, resource: memory, unit: byte }
+    curve: { baseline: 4294967296 }
+  - id: catalog_image_cache_entries
+    match: 'image_cache_entries|cache_size'
+    labels: { service: catalog, namespace: shop, cache: image-renditions }
+    curve:
+      baseline: 0
+      round: true
+      clamp: { min: 0 }
+      phases:
+        - { shape: sawtooth, at: 30m, to: 1840000, period: 6h }
+
+  # --- GC: share of time spent collecting.
+  - id: catalog_gc_time_ratio
+    match: 'jvm_gc_duration_seconds|jvm_gc_collection_seconds|jvm_gc_pause_seconds'
+    labels: { service: catalog, namespace: shop }
+    curve:
+      baseline: 0.012
+      noise: { stddev: 0.002 }
+      clamp: { min: 0, max: 1 }
+      phases:
+        - { shape: sawtooth, at: 30m, to: 0.41, period: 6h }
+
+  # --- Restarts.
+  - id: catalog_restarts_increase
+    match: 'increase\(\s*kube_pod_container_status_restarts_total'
+    labels: { namespace: shop, container: catalog, pod: catalog-7d9f8b6c4-x2x9q }
+    curve:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 6h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 7h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 12h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 13h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 18h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 19h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 24h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 25h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 30h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 31h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 36h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 37h30m, to: 0, over: 0s }
+        - { shape: ramp, at: 42h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 43h30m, to: 0, over: 0s }
+  - id: catalog_restarts_total
+    match: 'kube_pod_container_status_restarts_total'
+    labels: { namespace: shop, container: catalog, pod: catalog-7d9f8b6c4-x2x9q }
+    curve:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 6h30m, to: 1, over: 0s }
+        - { shape: ramp, at: 12h30m, to: 2, over: 0s }
+        - { shape: ramp, at: 18h30m, to: 3, over: 0s }
+        - { shape: ramp, at: 24h30m, to: 4, over: 0s }
+        - { shape: ramp, at: 30h30m, to: 5, over: 0s }
+        - { shape: ramp, at: 36h30m, to: 6, over: 0s }
+        - { shape: ramp, at: 42h30m, to: 7, over: 0s }
+  - id: catalog_last_terminated_oomkilled
+    match: 'kube_pod_container_status_last_terminated_reason'
+    labels: { namespace: shop, container: catalog, pod: catalog-7d9f8b6c4-x2x9q, reason: OOMKilled }
+    curve:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 6h30m, to: 1, over: 0s }
+
+  # --- HTTP: latency follows the heap (GC pauses), errors only near the top.
+  - id: catalog_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: catalog, namespace: shop }
+    # 0 below a 2.6GB heap, ~6% at the top of each cycle.
+    curve: { ref: catalog_jvm_heap_used_bytes, scale: 0.000000000068, offset: -0.1768, clamp: { min: 0 } }
+  - id: search_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: search, namespace: shop }
+    curve: { baseline: 0.0003, noise: { stddev: 0.0001 }, clamp: { min: 0 } }
+  - id: catalog_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: catalog, namespace: shop }
+    curve:
+      baseline: 0.085
+      noise: { stddev: 0.006 }
+      clamp: { min: 0 }
+      phases:
+        - { shape: sawtooth, at: 30m, to: 1.6, period: 6h }
+  - id: search_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: search, namespace: shop }
+    curve: { baseline: 0.12, seasonality: &diurnal { period: 24h, amplitude: 0.35, peakAt: 14h }, noise: { stddev: 0.008 }, clamp: { min: 0 } }
+  - id: catalog_http_p50_seconds
+    match: 'histogram_quantile\(\s*0?\.5\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: catalog, namespace: shop }
+    curve:
+      baseline: 0.022
+      noise: { stddev: 0.0015 }
+      clamp: { min: 0 }
+      phases:
+        - { shape: sawtooth, at: 30m, to: 0.19, period: 6h }
+  - id: search_http_p50_seconds
+    match: 'histogram_quantile\(\s*0?\.5\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: search, namespace: shop }
+    curve: { baseline: 0.031, seasonality: *diurnal, noise: { stddev: 0.002 }, clamp: { min: 0 } }
+  - id: catalog_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: catalog, namespace: shop, http_response_status_code: '200' }
+    curve: { baseline: 240, seasonality: *diurnal, noise: { stddev: 6 }, clamp: { min: 0 } }
+  - id: catalog_http_rps_503
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: catalog, namespace: shop, http_response_status_code: '503' }
+    curve: { ref: catalog_http_error_ratio, scale: 240 }
+  - id: search_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: search, namespace: shop, http_response_status_code: '200' }
+    curve: { baseline: 90, seasonality: *diurnal, noise: { stddev: 3 }, clamp: { min: 0 } }
+
+  # --- CPU: GC burns it.
+  - id: catalog_cpu_cores
+    match: 'container_cpu_usage_seconds_total|process_cpu_seconds_total'
+    labels: { namespace: shop, service: catalog }
+    curve: { ref: catalog_gc_time_ratio, scale: 3.2, offset: 0.55, noise: { stddev: 0.04 }, clamp: { min: 0 } }
+  - id: search_cpu_cores
+    match: 'container_cpu_usage_seconds_total|process_cpu_seconds_total'
+    labels: { namespace: shop, service: search }
+    curve: { baseline: 0.8, seasonality: *diurnal, noise: { stddev: 0.05 }, clamp: { min: 0 } }
+
+  - id: up_catalog
+    match: '\bup\b'
+    labels: { job: catalog, namespace: shop }
+    curve:
+      baseline: 1
+      round: true
+      phases:
+        - { shape: spike, at: 6h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 12h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 18h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 24h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 30h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 36h30m, to: 0, decay: 90s }
+        - { shape: spike, at: 42h30m, to: 0, decay: 90s }
+  - id: up_search
+    match: '\bup\b'
+    labels: { job: search, namespace: shop }
+    curve: { baseline: 1 }

@@ -1,0 +1,65 @@
+traces:
+  - id: checkout_post
+    rate: { ref: checkout_http_rps_200, scale: 0.05 }
+    duration: { ref: checkout_http_p99_seconds, scale: 600 }
+    jitter: 0.4
+    error: { ref: checkout_http_error_ratio }
+    root:
+      service: checkout
+      name: POST /api/checkout
+      kind: server
+      attributes: { http.request.method: POST, http.route: /api/checkout, http.response.status_code: 200 }
+      errorAttributes: { http.response.status_code: 502 }
+      children:
+        - service: checkout
+          name: cart.validate
+          kind: internal
+          share: { baseline: 0.08 }
+        - service: checkout
+          name: UPDATE orders
+          kind: client
+          attributes: { db.system: postgresql, db.namespace: orders, db.operation.name: UPDATE, db.collection.name: orders }
+          share: { baseline: 0.15 }
+        - service: checkout
+          name: POST /charges
+          kind: client
+          attributes: { http.request.method: POST, server.address: payments.shop.svc, http.response.status_code: 200 }
+          errorAttributes: { http.response.status_code: 502 }
+          share: { baseline: 0.6 }
+          children:
+            - service: payments
+              name: POST /charges
+              kind: server
+              attributes: { http.request.method: POST, http.route: /charges, http.response.status_code: 200 }
+              errorAttributes: { http.response.status_code: 502 }
+              share: { baseline: 0.92 }
+              children:
+                - service: payments
+                  name: POST /v1/payment_intents
+                  kind: client
+                  attributes: { http.request.method: POST, server.address: api.stripe.com, http.response.status_code: 200 }
+                  errorAttributes: { http.response.status_code: 502, error.type: '502' }
+                  share: { baseline: 0.85 }
+                  errorSource: true
+                  errorMessage: '502 Bad Gateway from api.stripe.com'
+
+  - id: payments_charge
+    rate: { ref: payments_http_rps_200, scale: 0.05 }
+    duration: { ref: payments_http_p99_seconds, scale: 600 }
+    jitter: 0.4
+    error: { ref: payments_http_error_ratio }
+    root:
+      service: payments
+      name: POST /charges
+      kind: server
+      attributes: { http.request.method: POST, http.route: /charges, http.response.status_code: 200 }
+      errorAttributes: { http.response.status_code: 502 }
+      children:
+        - service: payments
+          name: POST /v1/payment_intents
+          kind: client
+          attributes: { http.request.method: POST, server.address: api.stripe.com, http.response.status_code: 200 }
+          errorAttributes: { http.response.status_code: 502, error.type: '502' }
+          share: { baseline: 0.85 }
+          errorSource: true
+          errorMessage: '502 Bad Gateway from api.stripe.com'

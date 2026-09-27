@@ -1,0 +1,110 @@
+series:
+  - id: payments_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: payments, namespace: shop }
+    curve:
+      baseline: 0.0008
+      noise: { stddev: 0.0002 }
+      clamp: &non_negative { min: 0 }
+      phases:
+        - { shape: spike, at: 5s, to: 0.45, decay: 20s }
+  - id: checkout_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.0012
+      noise: { stddev: 0.0003 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 6s, to: 0.19, decay: 20s }
+  - id: inventory_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.0004, noise: { stddev: 0.0001 }, clamp: *non_negative }
+
+  - id: checkout_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.18
+      noise: { stddev: 0.012 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 6s, to: 0.62, decay: 20s }
+  - id: payments_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: payments, namespace: shop }
+    curve:
+      baseline: 0.21
+      noise: { stddev: 0.015 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 5s, to: 0.55, decay: 20s }
+  - id: inventory_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.09, noise: { stddev: 0.007 }, clamp: *non_negative }
+
+  - id: checkout_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: checkout, namespace: shop, http_response_status_code: '200' }
+    curve:
+      baseline: 118
+      noise: { stddev: 3.5 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 6s, to: 96, decay: 20s }
+  - id: checkout_http_rps_502
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: checkout, namespace: shop, http_response_status_code: '502' }
+    curve:
+      baseline: 0.02
+      noise: { stddev: 0.01 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 6s, to: 22, decay: 20s }
+  - id: payments_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: payments, namespace: shop, http_response_status_code: '200' }
+    curve:
+      baseline: 52
+      noise: { stddev: 1.8 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 5s, to: 29, decay: 20s }
+  - id: payments_http_rps_502
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: payments, namespace: shop, http_response_status_code: '502' }
+    curve:
+      baseline: 0.02
+      noise: { stddev: 0.01 }
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 5s, to: 23, decay: 20s }
+  - id: inventory_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: inventory, namespace: shop, http_response_status_code: '200' }
+    curve: { baseline: 140, noise: { stddev: 4.2 }, clamp: *non_negative }
+
+  # The provider call, from the payments client instrumentation.
+  - id: stripe_client_error_ratio
+    match: 'http_client_request_duration_seconds_count[\s\S]*5\.\.'
+    labels: { service: payments, server_address: api.stripe.com }
+    curve:
+      baseline: 0.0005
+      clamp: *non_negative
+      phases:
+        - { shape: spike, at: 5s, to: 0.62, decay: 18s }
+
+  - id: up_checkout
+    match: '\bup\b'
+    labels: { job: checkout, namespace: shop }
+    curve: { baseline: 1 }
+  - id: up_payments
+    match: '\bup\b'
+    labels: { job: payments, namespace: shop }
+    curve: { baseline: 1 }
+  - id: up_inventory
+    match: '\bup\b'
+    labels: { job: inventory, namespace: shop }
+    curve: { baseline: 1 }

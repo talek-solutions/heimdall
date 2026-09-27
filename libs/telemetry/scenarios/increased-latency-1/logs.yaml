@@ -1,0 +1,162 @@
+# Streams answer log queries: a stream selector narrows by these labels and line
+# filters (|= != |~ !~) run on the generated lines. `series` answer metric LogQL.
+# Secret-shaped strings below are documented examples or fake, and exist to give
+# the ADR 0008 scrubbers something to catch.
+streams:
+  - id: checkout_info
+    labels: { service_name: checkout, namespace: shop, level: info }
+    rate: { ref: checkout_http_rps_200, scale: 0.2 }
+    templates:
+      - line: 'level=info msg="request completed" method=POST route=/api/checkout status=200 duration_ms={ref:checkout_http_p50_seconds*1000} order_id={uuid} trace_id={traceId:checkout_post}'
+        weight: { baseline: 6 }
+      - line: 'level=info msg="order persisted" order_id={uuid} table=orders db_ms={ref:orders_db_operation_p99_seconds*400}'
+        weight: { baseline: 3 }
+      - line: 'level=info msg="cart validated" cart_id={hex:12} items={int:1-7}'
+        weight: { baseline: 2 }
+
+  - id: checkout_warn
+    labels: { service_name: checkout, namespace: shop, level: warn }
+    rate:
+      baseline: 0.25
+      noise: { stddev: 0.05 }
+      clamp: { min: 0 }
+      phases:
+        - { shape: ramp, at: 87m, to: 9, over: 8m }
+    templates:
+      - line: 'level=warn msg="retrying inventory reservation" attempt=2 sku=SKU-{int:10000-99999}'
+        weight: { baseline: 1 }
+      - line: 'level=warn msg="token refresh failed, retrying" authorization="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"'
+        weight: { baseline: 0.05 }
+      - line: 'level=warn msg="slow query" db_system=postgresql operation=UPDATE table=orders duration_ms={ref:orders_db_operation_p99_seconds*1000} threshold_ms=500'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 87m, to: 6, over: 3m }
+      - line: 'level=warn msg="connection pool usage high" pool=orders-pg in_use={ref:orders_pool_connections_used} max=50 pending={ref:orders_pool_pending_requests}'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 89m, to: 4, over: 3m }
+
+  - id: checkout_error
+    labels: { service_name: checkout, namespace: shop, level: error }
+    rate: { ref: checkout_http_error_ratio, scale: 110 }
+    templates:
+      - line: 'level=error msg="payment declined" provider=stripe code=card_declined order_id={uuid} customer={pick:jane.doe@example.com|j.smith@example.org|m.garcia@example.net} trace_id={traceId:checkout_post}'
+        weight: { baseline: 1 }
+      - line: 'level=error msg="db connect failed" dsn="postgres://orders_app:s3cr3t-Passw0rd@orders-pg.data.svc:5432/orders?sslmode=require" error="connection reset by peer"'
+        weight: { baseline: 0.1 }
+      - line: 'level=error msg="request failed" method=POST route=/api/checkout status=504 error="context deadline exceeded" duration_ms={int:5000-5040} trace_id={traceId:checkout_post:error}'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 91m, to: 12, over: 5m }
+      - line: 'level=error msg="acquire connection timeout" pool=orders-pg waited_ms={int:5000-5004} in_use=50 max=50 error="pool exhausted" trace_id={traceId:checkout_post:error}'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 90m, to: 8, over: 5m }
+
+  - id: payments
+    labels: { service_name: payments, namespace: shop }
+    rate: { ref: payments_http_rps_200, scale: 0.12 }
+    templates:
+      - line: 'level=info msg="charge authorized" provider=stripe amount_cents={int:500-25000} currency=EUR payment_id=pay_{hex:24}'
+        weight: { baseline: 20 }
+      - line: 'level=warn msg="provider latency high" provider=stripe duration_ms={int:800-1600}'
+        weight: { baseline: 0.3 }
+      - line: 'level=info msg="loaded provider credentials" provider=aws-kms access_key_id=AKIAIOSFODNN7EXAMPLE region=eu-central-1'
+        weight: { baseline: 0.02 }
+
+  - id: inventory
+    labels: { service_name: inventory, namespace: shop }
+    rate: { ref: inventory_http_rps_200, scale: 0.05 }
+    templates:
+      - line: 'level=info msg="stock reserved" sku=SKU-{int:10000-99999} qty={int:1-4} warehouse={pick:ams-1|fra-2|waw-1}'
+        weight: { baseline: 10 }
+      - line: 'level=info msg="stock level low" sku=SKU-{int:10000-99999} remaining={int:1-9}'
+        weight: { baseline: 0.4 }
+
+  # PostgreSQL server log. PID 47102 is the batch job's backend holding the locks.
+  - id: orders_pg
+    labels: { service_name: orders-pg, namespace: data }
+    rate:
+      baseline: 0.4
+      clamp: { min: 0 }
+      phases:
+        - { shape: ramp, at: 86m, to: 7, over: 6m }
+    templates:
+      - line: 'LOG:  checkpoint complete: wrote {int:900-2400} buffers ({int:5-15}.{int:0-9}%); 0 WAL file(s) added, 0 removed, {int:1-3} recycled'
+        weight: { baseline: 1 }
+      - line: 'LOG:  automatic vacuum of table "orders.public.{pick:order_items|carts|shipments}": index scans: 1'
+        weight: { baseline: 1 }
+      - line: 'LOG:  process {int:48000-48999} still waiting for ShareLock on transaction 99182731 after {int:1000-4999}.{int:100-999} ms'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 87m, to: 6, over: 4m }
+      - line: 'DETAIL:  Process holding the lock: 47102. Wait queue: {int:48000-48999}, {int:48000-48999}, {int:48000-48999}.'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 87m, to: 4, over: 4m }
+      - line: 'LOG:  duration: {ref:orders_db_operation_p99_seconds*1000}.{int:100-999} ms  statement: UPDATE orders SET status = $1, updated_at = now() WHERE id = $2'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 88m, to: 5, over: 4m }
+      - line: 'ERROR:  canceling statement due to statement timeout'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 92m, to: 2, over: 4m }
+
+  - id: orders_reconcile
+    labels: { service_name: orders-reconcile, namespace: shop, job: orders-reconcile-29311260 }
+    rate:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 86m, to: 0.5, over: 0s }
+    templates:
+      - line: 'level=info msg="reconciling batch" batch={int:1-400} rows=5000 table=orders isolation=repeatable_read tx_open_seconds={ref:orders_pg_max_tx_duration_seconds*1}'
+        weight: { baseline: 10 }
+      - line: 'level=info msg="upstream ledger page fetched" page={int:1-900} ledger_ms={int:900-2400}'
+        weight: { baseline: 6 }
+
+# Metric LogQL. `scaleByRange` curves are per second and answer counts:
+# count_over_time(...[5m]) is 300 times the curve, rounded.
+series:
+  - id: log_lines_rate
+    match: '\brate\(\s*\{'
+    labels: { service_name: checkout, level: error }
+    curve: { ref: checkout_http_error_ratio, scale: 110 }
+  - id: log_lines_rate_warn
+    match: '\brate\(\s*\{'
+    labels: { service_name: checkout, level: warn }
+    curve:
+      baseline: 0.25
+      clamp: { min: 0 }
+      phases:
+        - { shape: ramp, at: 87m, to: 9, over: 8m }
+  - id: log_lines_count_error
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: checkout, level: error }
+    scaleByRange: true
+    curve: { ref: checkout_http_error_ratio, scale: 110 }
+  - id: log_lines_count_warn
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: checkout, level: warn }
+    scaleByRange: true
+    curve:
+      baseline: 0.25
+      clamp: { min: 0 }
+      phases:
+        - { shape: ramp, at: 87m, to: 9, over: 8m }
+  - id: log_lines_count_pg
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: orders-pg }
+    scaleByRange: true
+    curve:
+      baseline: 0.4
+      phases:
+        - { shape: ramp, at: 86m, to: 7, over: 6m }

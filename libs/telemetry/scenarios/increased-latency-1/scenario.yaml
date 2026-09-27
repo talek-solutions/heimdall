@@ -1,0 +1,11 @@
+version: 1
+# Never emitted in generated data.
+description: >
+  At T-34m a reconciliation batch job opens a long transaction on orders-pg and
+  holds row locks on `orders`. Checkout's UPDATEs queue behind the locks, its
+  connection pool (max 50) saturates by T-28m, and checkout p99 climbs from
+  ~180ms to ~2.4s between T-30m and T-20m, with 504s from T-28m. Payments and
+  inventory stay healthy, which is what localises the fault.
+seed: 4211
+duration: 2h
+resolution: 15s

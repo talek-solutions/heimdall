@@ -1,0 +1,254 @@
+# Reference system manifest for ADR 0015. See README.md in this folder for the graph it
+# compiles into. The `# e1`..`# e8` comments only align dependencies with that page.
+apiVersion: heimdall/v1
+kind: System
+metadata: { name: shop }
+spec:
+  description: Online ordering with asynchronous fulfilment and live status
+  environments:
+    - name: prod
+      context: prod
+      labels: { env: prod }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: frontend, system: shop }
+spec:
+  type: frontend
+  telemetry:
+    logs: { selector: '{app="frontend"}', fields: { level: severity, msg: message, trace_id: traceId } }
+  metrics:
+    - { name: browser_errors_total, type: counter }
+  indicators:
+    - { metric: browser_errors_total, role: errors, expect: { kind: baseline } }
+  dependsOn:
+    - name: orders-api # e1
+      target: services-2
+      transport: http
+      mode: sync
+      criticality: hard
+      operations: ['POST /orders']
+    - name: orders-ws # e2
+      target: services-2
+      transport: websocket
+      mode: sync
+      criticality: hard
+      operations: [subscribe]
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: services-2, system: shop }
+spec:
+  type: service
+  exposes:
+    - { transport: http, spec: ./apps/api/openapi.yaml }
+    - { transport: websocket, route: /ws/orders }
+  telemetry:
+    logs: { selector: '{app="services-2"}', fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId } }
+    metrics: { matchers: { job: services-2 } }
+    traces: { serviceName: services-2 }
+  metrics:
+    - { name: http_server_requests_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { route: route, method: method, status: statusCode } }
+    - { name: ws_messages_failed_total, type: counter, role: errors, measures: { inbound: websocket }, labels: { path: route } }
+    - { name: db_client_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { operation: operation, table: table, outcome: outcome } }
+    - { name: redis_client_seconds, type: histogram, unit: seconds, measures: { outbound: status-cache }, labels: { command: operation, outcome: outcome } }
+    - { name: kafka_producer_errors_total, type: counter, role: errors, measures: { outbound: order-events-out }, labels: { topic: topic } }
+    - { name: nodejs_eventloop_lag_seconds, type: gauge, unit: seconds, role: saturation }
+    - { name: orders_created_total, type: counter }
+    - { name: order_submit_seconds, type: histogram, unit: seconds }
+    - { name: ws_active_connections, type: gauge }
+    - { name: status_push_delivered_total, type: counter }
+    - { name: status_push_delay_seconds, type: histogram, unit: seconds }
+  dependsOn:
+    - name: order-events-out # e3
+      target: kafka
+      transport: kafka
+      mode: async
+      criticality: hard
+      operations: [produce]
+      topic: order-events
+    - name: status-cache # e5
+      target: redis-cache
+      transport: redis
+      mode: sync
+      criticality: soft
+      role: cache-aside
+      operations: [HGET, HSET]
+      config: { ttlSeconds: 300, timeoutMs: 50 }
+    - name: orders-db # e7
+      target: mysql-main
+      transport: sql
+      mode: sync
+      criticality: hard
+      operations: [INSERT, SELECT]
+      writeTo: primary
+      readFrom: replicas
+      config: { poolSize: 20, timeoutMs: 2000 }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: services-3, system: shop }
+spec:
+  type: service
+  telemetry:
+    logs: { selector: '{app="services-3"}', fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId } }
+    metrics: { matchers: { job: services-3 } }
+    traces: { serviceName: services-3 }
+  metrics:
+    - { name: kafka_consumer_records_total, type: counter, measures: { outbound: order-events-in }, labels: { topic: topic, group: consumerGroup } }
+    - { name: db_client_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { operation: operation, table: table, outcome: outcome } }
+    - { name: nodejs_eventloop_lag_seconds, type: gauge, unit: seconds, role: saturation }
+    - { name: orders_fulfilled_total, type: counter }
+    - { name: order_fulfilment_seconds, type: histogram, unit: seconds }
+  dependsOn:
+    - name: order-events-in # e4
+      target: kafka
+      transport: kafka
+      mode: async
+      criticality: hard
+      operations: [consume]
+      topic: order-events
+      consumerGroup: s3-orders
+    - name: status-cache # e6
+      target: redis-cache
+      transport: redis
+      mode: sync
+      criticality: soft
+      operations: [HGETALL, SMEMBERS]
+    - name: orders-db # e8
+      target: mysql-main
+      transport: sql
+      mode: sync
+      criticality: hard
+      operations: [UPDATE, SELECT]
+      writeTo: primary
+      readFrom: replicas
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: kafka, system: shop }
+spec:
+  type: broker
+  engine: kafka
+  telemetry:
+    metrics: { matchers: { job: kafka-exporter } }
+  dataModel:
+    - { kind: topic, name: order-events, partitions: 12, key: orderId }
+  metrics:
+    - { name: kafka_consumergroup_lag, type: gauge, unit: messages, labels: { topic: topic, consumergroup: consumerGroup } }
+    - { name: kafka_under_replicated_partitions, type: gauge, role: saturation }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: redis-cache, system: shop }
+spec:
+  type: cache
+  engine: redis
+  telemetry:
+    metrics: { matchers: { job: redis-exporter } }
+  topology:
+    mode: cluster
+    members:
+      - { name: node-1, role: shard, telemetry: { metrics: { matchers: { instance: 'redis-0:9121' } } } }
+      - { name: node-2, role: shard, telemetry: { metrics: { matchers: { instance: 'redis-1:9121' } } } }
+      - { name: node-3, role: shard, telemetry: { metrics: { matchers: { instance: 'redis-2:9121' } } } }
+  dataModel:
+    - { kind: hash, key: 'order:{id}:status' }
+  metrics:
+    - { name: redis_memory_used_bytes, type: gauge, unit: bytes }
+    - { name: redis_memory_max_bytes, type: gauge, unit: bytes }
+    - { name: redis_evicted_keys_total, type: counter, role: errors }
+  indicators:
+    - ratio: { numerator: redis_memory_used_bytes, denominator: redis_memory_max_bytes }
+      role: saturation
+      expect: { kind: threshold, max: 0.8 }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: mysql-main, system: shop }
+spec:
+  type: datastore
+  engine: mysql
+  telemetry:
+    metrics: { matchers: { job: mysql-exporter } }
+  topology:
+    mode: primary-replica
+    replication: async
+    members:
+      - { name: primary, role: primary, telemetry: { metrics: { matchers: { instance: 'mysql-0:9104' } } } }
+      - name: replica-1
+        role: replica
+        telemetry: { metrics: { matchers: { instance: 'mysql-1:9104' } } }
+        indicators:
+          - { metric: mysql_replica_lag_seconds, role: lag, expect: { kind: threshold, max: 5 } }
+      - name: replica-2
+        role: replica
+        telemetry: { metrics: { matchers: { instance: 'mysql-2:9104' } } }
+        indicators:
+          - { metric: mysql_replica_lag_seconds, role: lag, expect: { kind: threshold, max: 5 } }
+  dataModel:
+    - { kind: table, name: orders }
+  metrics:
+    - { name: mysql_global_status_threads_connected, type: gauge, role: saturation }
+    - { name: mysql_replica_lag_seconds, type: gauge, unit: seconds }
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata: { name: ordering, system: shop }
+spec:
+  description: Customers place orders; orders are fulfilled asynchronously
+  flows: [submit-order, fulfil-order]
+  indicators:
+    - { metric: services-2/orders_created_total, role: kpi, expect: { kind: baseline } }
+    - ratio: { numerator: services-3/orders_fulfilled_total, denominator: services-2/orders_created_total }
+      role: kpi
+      expect: { kind: slo, min: 0.99 }
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata: { name: order-tracking, system: shop }
+spec:
+  description: Customers see live order status
+  flows: [status-push]
+  indicators:
+    - { metric: services-2/ws_active_connections, role: kpi, expect: { kind: baseline } }
+    - { metric: services-2/status_push_delivered_total, role: kpi, expect: { kind: nonZero } }
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata: { name: submit-order, system: shop }
+spec:
+  mode: sync
+  steps:
+    - { dependency: frontend/orders-api, match: { route: /orders, method: POST } }
+    - { dependency: services-2/orders-db, match: { operation: INSERT, table: orders } }
+    - { dependency: services-2/order-events-out, match: { topic: order-events } }
+  indicators:
+    - { metric: services-2/order_submit_seconds, role: latency, expect: { kind: slo, p95: 0.8 } }
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata: { name: fulfil-order, system: shop }
+spec:
+  mode: async
+  propagatesTraceContext: false
+  correlationKey: orderId
+  steps:
+    - dependency: services-3/order-events-in
+      match: { topic: order-events, consumerGroup: s3-orders }
+      indicators:
+        - { metric: kafka/kafka_consumergroup_lag, role: lag, expect: { kind: threshold, max: 1000 } }
+    - { dependency: services-3/orders-db, match: { operation: UPDATE, table: orders } }
+  indicators:
+    - { metric: services-3/order_fulfilment_seconds, role: latency, expect: { kind: slo, p95: 30 } }
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata: { name: status-push, system: shop }
+spec:
+  mode: sync
+  steps:
+    - { dependency: frontend/orders-ws, match: { route: /ws/orders } }
+    - { dependency: services-2/status-cache, match: { operation: HGET } }
+  indicators:
+    - { metric: services-2/status_push_delay_seconds, role: latency, expect: { kind: baseline } }

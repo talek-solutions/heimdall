@@ -1,0 +1,134 @@
+# Durations are milliseconds; `share` is a fraction of the parent's duration and
+# children run one after another. An error trace fails at its `errorSource` span.
+traces:
+  - id: checkout_post
+    rate: { ref: checkout_http_rps_200, scale: 0.05 }
+    duration: { ref: checkout_http_p50_seconds, scale: 1000 }
+    errorDuration: { baseline: 5010 }
+    jitter: 0.45
+    error: { ref: checkout_http_error_ratio }
+    root:
+      service: checkout
+      name: POST /api/checkout
+      kind: server
+      attributes: { http.request.method: POST, http.route: /api/checkout, http.response.status_code: 200, url.scheme: https }
+      errorAttributes: { http.response.status_code: 504, error.type: timeout }
+      children:
+        - service: checkout
+          name: cart.validate
+          kind: internal
+          share:
+            baseline: 0.08
+            phases:
+              - { shape: ramp, at: 88m, to: 0.005, over: 6m }
+        - service: checkout
+          name: POST /reserve
+          kind: client
+          attributes: { http.request.method: POST, server.address: inventory.shop.svc, http.response.status_code: 200 }
+          share:
+            baseline: 0.22
+            phases:
+              - { shape: ramp, at: 88m, to: 0.02, over: 6m }
+          children:
+            - service: inventory
+              name: POST /reserve
+              kind: server
+              attributes: { http.request.method: POST, http.route: /reserve, http.response.status_code: 200 }
+              share: { baseline: 0.9 }
+              children:
+                - service: inventory
+                  name: SELECT stock
+                  kind: client
+                  attributes: { db.system: postgresql, db.namespace: inventory, db.operation.name: SELECT, db.collection.name: stock }
+                  share: { baseline: 0.45 }
+        - service: checkout
+          name: UPDATE orders
+          kind: client
+          attributes:
+            db.system: postgresql
+            db.namespace: orders
+            db.operation.name: UPDATE
+            db.collection.name: orders
+            db.query.text: 'UPDATE orders SET status = $1, updated_at = now() WHERE id = $2'
+            server.address: orders-pg.data.svc
+          share:
+            baseline: 0.18
+            phases:
+              - { shape: ramp, at: 88m, to: 0.93, over: 6m }
+          errorSource: true
+          errorMessage: 'pool exhausted: timed out after 5000ms waiting for a connection to orders-pg'
+          errorAttributes: { error.type: PoolTimeoutError }
+        - service: checkout
+          name: POST /charges
+          kind: client
+          attributes: { http.request.method: POST, server.address: payments.shop.svc, http.response.status_code: 200 }
+          share:
+            baseline: 0.35
+            phases:
+              - { shape: ramp, at: 88m, to: 0.02, over: 6m }
+          children:
+            - service: payments
+              name: POST /charges
+              kind: server
+              attributes: { http.request.method: POST, http.route: /charges, http.response.status_code: 200 }
+              share: { baseline: 0.92 }
+              children:
+                - service: payments
+                  name: POST /v1/payment_intents
+                  kind: client
+                  attributes: { http.request.method: POST, server.address: api.stripe.com, http.response.status_code: 200 }
+                  share: { baseline: 0.8 }
+
+  - id: inventory_lookup
+    rate: { ref: inventory_http_rps_200, scale: 0.02 }
+    duration: { ref: inventory_http_p50_seconds, scale: 1000 }
+    jitter: 0.35
+    error: { ref: inventory_http_error_ratio }
+    root:
+      service: inventory
+      name: GET /api/stock/{sku}
+      kind: server
+      attributes: { http.request.method: GET, http.route: '/api/stock/{sku}', http.response.status_code: 200 }
+      errorAttributes: { http.response.status_code: 500 }
+      children:
+        - service: inventory
+          name: GET stock-cache
+          kind: client
+          attributes: { db.system: redis, db.operation.name: GET }
+          share: { baseline: 0.15 }
+        - service: inventory
+          name: SELECT stock
+          kind: client
+          attributes: { db.system: postgresql, db.namespace: inventory, db.operation.name: SELECT, db.collection.name: stock }
+          share: { baseline: 0.6 }
+
+  # The batch job: one trace per reconciled batch, from T-34m.
+  - id: orders_reconcile_batch
+    rate:
+      baseline: 0
+      phases:
+        - { shape: ramp, at: 86m, to: 0.1, over: 0s }
+    duration: { baseline: 1800 }
+    jitter: 0.3
+    root:
+      service: orders-reconcile
+      name: reconcile batch
+      kind: internal
+      attributes: { job.name: orders-reconcile-29311260, batch.rows: 5000 }
+      children:
+        - service: orders-reconcile
+          name: GET /v2/ledger/entries
+          kind: client
+          attributes: { http.request.method: GET, server.address: ledger.finance.svc, http.response.status_code: 200 }
+          share: { baseline: 0.55 }
+        - service: orders-reconcile
+          name: UPDATE orders
+          kind: client
+          attributes:
+            db.system: postgresql
+            db.namespace: orders
+            db.operation.name: UPDATE
+            db.collection.name: orders
+            db.query.text: 'UPDATE orders SET reconciled_at = now(), ledger_ref = $1 WHERE id = ANY($2)'
+            db.transaction.isolation: repeatable_read
+          share: { baseline: 0.4 }

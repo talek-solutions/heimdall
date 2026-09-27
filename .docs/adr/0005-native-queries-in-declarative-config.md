@@ -40,3 +40,7 @@ allowlist keys off (0008), so it is load-bearing twice over.
 
 **Follow-up (0013):** backends moved to the user-level config as aliased `sources`; queries
 will live in a separate config that references those aliases.
+
+**Follow-up (0015):** most queries are now built from manifest indicators through fixed
+templates (the native `query:` stays as an override), and the field mapping moves from each
+query onto log streams and metric definitions.

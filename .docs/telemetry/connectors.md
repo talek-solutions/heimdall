@@ -18,6 +18,14 @@ Any configured source can be passed as-is. The connector never sees `alias`, `me
 
 `grafana` sources are not supported yet. Their `url` is Grafana's URL, not the datasource proxy path.
 
+## Fixture datasources
+
+Each backend can be answered by a fixture instead of HTTP: `PROMETHEUS_DATASOURCE_TYPE`,
+`LOKI_DATASOURCE_TYPE` and `TEMPO_DATASOURCE_TYPE` take `http` (the default) or `fixture`,
+and `TELEMETRY_FIXTURE_SCENARIO` names the scenario. The factory returns the same
+connector classes either way; in fixture mode the source's URL and auth are ignored and
+nothing reaches the network. See [fixtures.md](fixtures.md) and ADR 0014.
+
 ## Usage
 
 ```ts
@@ -59,3 +67,6 @@ env vars, never their values, and never include the query string.
 | `TELEMETRY_TIMEOUT` | `timeoutMs` elapsed | 1 |
 | `TELEMETRY_NETWORK_ERROR` | no HTTP response came back (DNS, TLS, socket, caller abort) | 1 |
 | `TELEMETRY_INVALID_RESPONSE` | a 2xx status with a body that doesn't match the backend's documented shape | 1 |
+| `TELEMETRY_INVALID_DATASOURCE_CONFIG` | an unknown `*_DATASOURCE_TYPE`, a malformed `TELEMETRY_FIXTURE_ANCHOR`, or a fixture without `TELEMETRY_FIXTURE_SCENARIO`. Checked at startup | 2 |
+| `TELEMETRY_FIXTURE_SCENARIO_NOT_FOUND` | the named scenario does not exist. Checked at startup | 2 |
+| `TELEMETRY_FIXTURE_SCENARIO_INVALID` | a scenario file fails to parse or validate; the message names file and field. Checked at startup | 2 |

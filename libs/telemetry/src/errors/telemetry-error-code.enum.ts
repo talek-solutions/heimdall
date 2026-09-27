@@ -16,4 +16,10 @@ export enum TelemetryErrorCode {
   NetworkError = 'TELEMETRY_NETWORK_ERROR',
   /** 2xx with a body this lib cannot interpret. */
   InvalidResponse = 'TELEMETRY_INVALID_RESPONSE',
+  /** A `*_DATASOURCE_TYPE` or `TELEMETRY_FIXTURE_*` variable is invalid, or a fixture has no scenario. */
+  InvalidDatasourceConfig = 'TELEMETRY_INVALID_DATASOURCE_CONFIG',
+  /** No fixture scenario directory with the configured name. */
+  FixtureScenarioNotFound = 'TELEMETRY_FIXTURE_SCENARIO_NOT_FOUND',
+  /** A scenario file fails to parse or validate; the message names the file and field. */
+  FixtureScenarioInvalid = 'TELEMETRY_FIXTURE_SCENARIO_INVALID',
 }

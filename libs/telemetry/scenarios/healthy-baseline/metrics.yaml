@@ -1,0 +1,240 @@
+# Each series is a query RESULT. The first `match` that fits the query wins, and
+# label matchers in the query (service="checkout") narrow within it, so put
+# specific patterns before general ones.
+series:
+  # --- Error ratio (5xx / all): must precede the plain request-rate family.
+  - id: checkout_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.0012
+      noise: { stddev: 0.0003 }
+      clamp: &non_negative { min: 0 }
+  - id: payments_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: payments, namespace: shop }
+    curve: { baseline: 0.0008, noise: { stddev: 0.0002 }, clamp: *non_negative }
+  - id: inventory_http_error_ratio
+    match: 'http_server_request_duration_seconds_count[^/]*5\.\.[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.0004, noise: { stddev: 0.0001 }, clamp: *non_negative }
+
+  # --- Average latency (sum / count): must precede the request-rate family.
+  - id: checkout_http_avg_seconds
+    match: 'http_server_request_duration_seconds_sum[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.061
+      noise: { stddev: 0.004 }
+      clamp: *non_negative
+  - id: payments_http_avg_seconds
+    match: 'http_server_request_duration_seconds_sum[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: payments, namespace: shop }
+    curve: { baseline: 0.074, noise: { stddev: 0.005 }, clamp: *non_negative }
+  - id: inventory_http_avg_seconds
+    match: 'http_server_request_duration_seconds_sum[\s\S]*/[\s\S]*http_server_request_duration_seconds_count'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.021, noise: { stddev: 0.002 }, clamp: *non_negative }
+
+  # --- Latency quantiles over the server duration histogram.
+  - id: checkout_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.18
+      seasonality: &diurnal { period: 24h, amplitude: 0.08, peakAt: 14h }
+      noise: { stddev: 0.012 }
+      clamp: *non_negative
+  - id: payments_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: payments, namespace: shop }
+    curve: { baseline: 0.21, seasonality: *diurnal, noise: { stddev: 0.015 }, clamp: *non_negative }
+  - id: inventory_http_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.09, seasonality: *diurnal, noise: { stddev: 0.007 }, clamp: *non_negative }
+
+  - id: checkout_http_p95_seconds
+    match: 'histogram_quantile\(\s*0?\.95\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.12
+      seasonality: *diurnal
+      noise: { stddev: 0.008 }
+      clamp: *non_negative
+  - id: payments_http_p95_seconds
+    match: 'histogram_quantile\(\s*0?\.95\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: payments, namespace: shop }
+    curve: { baseline: 0.15, seasonality: *diurnal, noise: { stddev: 0.01 }, clamp: *non_negative }
+  - id: inventory_http_p95_seconds
+    match: 'histogram_quantile\(\s*0?\.95\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.06, seasonality: *diurnal, noise: { stddev: 0.004 }, clamp: *non_negative }
+
+  - id: checkout_http_p50_seconds
+    match: 'histogram_quantile\(\s*0?\.5\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: checkout, namespace: shop }
+    curve:
+      baseline: 0.045
+      seasonality: *diurnal
+      noise: { stddev: 0.003 }
+      clamp: *non_negative
+  - id: payments_http_p50_seconds
+    match: 'histogram_quantile\(\s*0?\.5\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: payments, namespace: shop }
+    curve: { baseline: 0.058, seasonality: *diurnal, noise: { stddev: 0.004 }, clamp: *non_negative }
+  - id: inventory_http_p50_seconds
+    match: 'histogram_quantile\(\s*0?\.5\s*,[\s\S]*http_server_request_duration_seconds'
+    labels: { service: inventory, namespace: shop }
+    curve: { baseline: 0.016, seasonality: *diurnal, noise: { stddev: 0.0015 }, clamp: *non_negative }
+
+  # --- Request rate per status code (rate over the histogram count or a requests counter).
+  - id: checkout_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: checkout, namespace: shop, http_response_status_code: '200' }
+    curve:
+      baseline: 118
+      seasonality: *diurnal
+      noise: { stddev: 3.5 }
+      clamp: *non_negative
+  - id: checkout_http_rps_500
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: checkout, namespace: shop, http_response_status_code: '500' }
+    curve: { baseline: 0.1, noise: { stddev: 0.03 }, clamp: *non_negative }
+  - id: checkout_http_rps_504
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: checkout, namespace: shop, http_response_status_code: '504' }
+    curve:
+      baseline: 0.04
+      noise: { stddev: 0.02 }
+      clamp: *non_negative
+  - id: payments_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: payments, namespace: shop, http_response_status_code: '200' }
+    curve:
+      baseline: 52
+      seasonality: *diurnal
+      noise: { stddev: 1.8 }
+      clamp: *non_negative
+  - id: payments_http_rps_500
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: payments, namespace: shop, http_response_status_code: '500' }
+    curve: { baseline: 0.04, noise: { stddev: 0.015 }, clamp: *non_negative }
+  - id: inventory_http_rps_200
+    match: 'http_server_request_duration_seconds_count|http_server_requests_total'
+    labels: { service: inventory, namespace: shop, http_response_status_code: '200' }
+    curve: { baseline: 140, seasonality: *diurnal, noise: { stddev: 4.2 }, clamp: *non_negative }
+
+  # --- orders-pg client side (checkout's connection pool).
+  - id: orders_pool_connections_used
+    match: 'db_client_connections_usage'
+    labels: { service: checkout, pool_name: orders-pg, state: used }
+    curve:
+      baseline: 11
+      round: true
+      noise: { stddev: 1.2 }
+      clamp: { min: 0, max: 50 }
+  - id: orders_pool_connections_idle
+    match: 'db_client_connections_usage'
+    labels: { service: checkout, pool_name: orders-pg, state: idle }
+    curve:
+      baseline: 39
+      round: true
+      noise: { stddev: 1.2 }
+      clamp: { min: 0, max: 50 }
+  - id: orders_pool_connections_max
+    match: 'db_client_connections_max'
+    labels: { service: checkout, pool_name: orders-pg }
+    curve: { baseline: 50 }
+  - id: orders_pool_pending_requests
+    match: 'db_client_connections_pending_requests'
+    labels: { service: checkout, pool_name: orders-pg }
+    curve:
+      baseline: 0
+      round: true
+      noise: { stddev: 0.3 }
+      clamp: *non_negative
+  - id: orders_db_operation_p99_seconds
+    match: 'histogram_quantile\(\s*0?\.99\s*,[\s\S]*db_client_operation_duration_seconds'
+    labels: { service: checkout, db_system: postgresql, db_namespace: orders }
+    curve:
+      baseline: 0.012
+      noise: { stddev: 0.0015 }
+      clamp: *non_negative
+
+  # --- orders-pg server side (postgres_exporter).
+  - id: orders_pg_row_exclusive_locks
+    match: 'pg_locks_count'
+    labels: { datname: orders, mode: rowexclusivelock }
+    curve:
+      baseline: 4
+      round: true
+      noise: { stddev: 1 }
+      clamp: *non_negative
+  - id: orders_pg_access_share_locks
+    match: 'pg_locks_count'
+    labels: { datname: orders, mode: accesssharelock }
+    curve: { baseline: 22, round: true, noise: { stddev: 3 }, clamp: *non_negative }
+  - id: orders_pg_max_tx_duration_seconds
+    match: 'pg_stat_activity_max_tx_duration'
+    labels: { datname: orders }
+    curve:
+      baseline: 0.4
+      noise: { stddev: 0.15 }
+      clamp: *non_negative
+  - id: orders_pg_connections_active
+    match: 'pg_stat_activity_count'
+    labels: { datname: orders, state: active }
+    curve:
+      baseline: 8
+      round: true
+      noise: { stddev: 1.5 }
+      clamp: *non_negative
+
+  # --- Resources (rate over CPU counters; working-set memory).
+  - id: checkout_cpu_cores
+    match: 'container_cpu_usage_seconds_total|process_cpu_seconds_total'
+    labels: { namespace: shop, service: checkout }
+    curve:
+      baseline: 0.42
+      seasonality: *diurnal
+      noise: { stddev: 0.03 }
+      clamp: *non_negative
+  - id: payments_cpu_cores
+    match: 'container_cpu_usage_seconds_total|process_cpu_seconds_total'
+    labels: { namespace: shop, service: payments }
+    curve: { baseline: 0.27, seasonality: *diurnal, noise: { stddev: 0.02 }, clamp: *non_negative }
+  - id: inventory_cpu_cores
+    match: 'container_cpu_usage_seconds_total|process_cpu_seconds_total'
+    labels: { namespace: shop, service: inventory }
+    curve: { baseline: 0.55, seasonality: *diurnal, noise: { stddev: 0.04 }, clamp: *non_negative }
+  - id: checkout_memory_bytes
+    match: 'container_memory_working_set_bytes|process_resident_memory_bytes'
+    labels: { namespace: shop, service: checkout }
+    curve: { baseline: 612000000, noise: { stddev: 6000000 }, clamp: *non_negative }
+  - id: payments_memory_bytes
+    match: 'container_memory_working_set_bytes|process_resident_memory_bytes'
+    labels: { namespace: shop, service: payments }
+    curve: { baseline: 388000000, noise: { stddev: 4000000 }, clamp: *non_negative }
+  - id: inventory_memory_bytes
+    match: 'container_memory_working_set_bytes|process_resident_memory_bytes'
+    labels: { namespace: shop, service: inventory }
+    curve: { baseline: 455000000, noise: { stddev: 5000000 }, clamp: *non_negative }
+
+  # --- Scrape health: last, because `up` is a short word.
+  - id: up_checkout
+    match: '\bup\b'
+    labels: { job: checkout, namespace: shop }
+    curve: { baseline: 1 }
+  - id: up_payments
+    match: '\bup\b'
+    labels: { job: payments, namespace: shop }
+    curve: { baseline: 1 }
+  - id: up_inventory
+    match: '\bup\b'
+    labels: { job: inventory, namespace: shop }
+    curve: { baseline: 1 }
+  - id: up_orders_pg
+    match: '\bup\b'
+    labels: { job: postgres-exporter, datname: orders }
+    curve: { baseline: 1 }

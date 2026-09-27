@@ -27,6 +27,16 @@ describe('exitCodeForError', () => {
     );
   });
 
+  it('maps invalid datasource selection and broken fixture scenarios to Usage', () => {
+    for (const code of [
+      TelemetryErrorCode.InvalidDatasourceConfig,
+      TelemetryErrorCode.FixtureScenarioNotFound,
+      TelemetryErrorCode.FixtureScenarioInvalid,
+    ]) {
+      assert.equal(exitCodeForError(new TelemetryError(code, 'x')), ExitCode.Usage, code);
+    }
+  });
+
   it('maps missing or rejected LLM credentials to ProviderAuth', () => {
     assert.equal(
       exitCodeForError(new LlmError(LlmErrorCode.MISSING_API_KEY, 'x')),

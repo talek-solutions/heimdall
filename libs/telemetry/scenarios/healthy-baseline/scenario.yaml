@@ -1,0 +1,9 @@
+version: 1
+# Never emitted in generated data.
+description: >
+  Control case: the same shop topology as increased-latency-1 with no incident.
+  Only diurnal seasonality and noise. An agent that finds a root cause here is
+  inventing one.
+seed: 1709
+duration: 2h
+resolution: 15s

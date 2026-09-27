@@ -1,0 +1,13 @@
+version: 1
+# Never emitted in generated data.
+description: >
+  catalog v2.14.0 ships at T-47h30m with an image-rendition cache that never
+  evicts. From then on the JVM heap climbs from ~0.7GB towards its 3.5GB max over
+  about six hours; GC time and latency rise with it, requests start failing with
+  OutOfMemoryError near the top, and the container is OOMKilled at its 4Gi limit
+  and restarts, every ~6h (seven times). At the anchor the heap is near
+  the top again and requests are failing. Traffic is diurnal, so the peaks do not
+  line up with the busiest hours: load is not the cause. Search stays healthy.
+seed: 8123
+duration: 2d
+resolution: 30s

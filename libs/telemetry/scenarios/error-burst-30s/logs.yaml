@@ -1,0 +1,43 @@
+streams:
+  - id: payments
+    labels: { service_name: payments, namespace: shop }
+    rate: { ref: payments_http_rps_200, scale: 0.12 }
+    templates:
+      - line: 'level=info msg="charge authorized" provider=stripe amount_cents={int:500-25000} currency=EUR payment_id=pay_{hex:24}'
+        weight: { baseline: 20 }
+      - line: 'level=warn msg="provider latency high" provider=stripe duration_ms={int:800-1600}'
+        weight: { baseline: 0.3 }
+
+  - id: payments_error
+    labels: { service_name: payments, namespace: shop, level: error }
+    rate: { ref: payments_http_rps_502, scale: 0.5 }
+    templates:
+      - line: 'level=error msg="provider request failed" provider=stripe server_address=api.stripe.com status=502 error="bad gateway" attempt={int:1-3} payment_id=pay_{hex:24} trace_id={traceId:payments_charge:error}'
+        weight: { baseline: 10 }
+      - line: 'level=error msg="retry budget exhausted" provider=stripe attempts=3 idempotency_key={uuid}'
+        weight: { baseline: 2 }
+
+  - id: checkout_error
+    labels: { service_name: checkout, namespace: shop, level: error }
+    rate: { ref: checkout_http_rps_502, scale: 0.4 }
+    templates:
+      - line: 'level=error msg="request failed" method=POST route=/api/checkout status=502 error="payments: upstream returned 502" order_id={uuid} trace_id={traceId:checkout_post:error}'
+        weight: { baseline: 1 }
+
+  - id: inventory
+    labels: { service_name: inventory, namespace: shop }
+    rate: { ref: inventory_http_rps_200, scale: 0.05 }
+    templates:
+      - line: 'level=info msg="stock reserved" sku=SKU-{int:10000-99999} qty={int:1-4} warehouse={pick:ams-1|fra-2|waw-1}'
+        weight: { baseline: 1 }
+
+series:
+  - id: payments_error_lines_rate
+    match: '\brate\(\s*\{'
+    labels: { service_name: payments, level: error }
+    curve: { ref: payments_http_rps_502, scale: 0.5 }
+  - id: payments_error_lines_count
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: payments, level: error }
+    scaleByRange: true
+    curve: { ref: payments_http_rps_502, scale: 0.5 }

@@ -1,0 +1,48 @@
+traces:
+  - id: catalog_get_product
+    rate: { ref: catalog_http_rps_200, scale: 0.01 }
+    duration: { ref: catalog_http_p50_seconds, scale: 1000 }
+    jitter: 0.5
+    error: { ref: catalog_http_error_ratio }
+    root:
+      service: catalog
+      name: GET /api/products/{id}
+      kind: server
+      attributes: { http.request.method: GET, http.route: '/api/products/{id}', http.response.status_code: 200 }
+      errorAttributes: { http.response.status_code: 503, error.type: java.lang.OutOfMemoryError }
+      errorSource: true
+      errorMessage: 'java.lang.OutOfMemoryError: Java heap space'
+      children:
+        - service: catalog
+          name: GET product-cache
+          kind: client
+          attributes: { db.system: redis, db.operation.name: GET }
+          share: { baseline: 0.06 }
+        - service: catalog
+          name: catalog.products find
+          kind: client
+          attributes: { db.system: mongodb, db.namespace: catalog, db.collection.name: products, db.operation.name: find }
+          share: { baseline: 0.3 }
+        - service: catalog
+          name: ImageCache.renditions
+          kind: internal
+          attributes: { cache.name: image-renditions }
+          share: { baseline: 0.25 }
+
+  - id: search_query
+    rate: { ref: search_http_rps_200, scale: 0.01 }
+    duration: { ref: search_http_p50_seconds, scale: 1000 }
+    jitter: 0.4
+    error: { ref: search_http_error_ratio }
+    root:
+      service: search
+      name: GET /api/search
+      kind: server
+      attributes: { http.request.method: GET, http.route: /api/search, http.response.status_code: 200 }
+      errorAttributes: { http.response.status_code: 500 }
+      children:
+        - service: search
+          name: POST /products/_search
+          kind: client
+          attributes: { db.system: elasticsearch, db.operation.name: search, server.address: es-search.data.svc }
+          share: { baseline: 0.7 }

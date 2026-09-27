@@ -13,6 +13,9 @@ const USAGE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   ...Object.values(ConfigErrorCode),
   ...Object.values(CliErrorCode),
   LlmErrorCode.INVALID_PROVIDER,
+  TelemetryErrorCode.InvalidDatasourceConfig,
+  TelemetryErrorCode.FixtureScenarioNotFound,
+  TelemetryErrorCode.FixtureScenarioInvalid,
 ]);
 
 /** Missing or rejected credentials, LLM or telemetry: .docs/adr/0006 reserves exit code 4 for these. */

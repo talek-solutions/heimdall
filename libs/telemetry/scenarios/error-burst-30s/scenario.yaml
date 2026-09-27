@@ -1,0 +1,11 @@
+version: 1
+# Never emitted in generated data.
+description: >
+  A 30-second burst: at T-25s the payment provider starts answering 502 for
+  about 20 seconds. Payments' error ratio spikes to ~45% and decays, checkout
+  surfaces the failures as 502s, and payment logs show the provider's bad
+  gateway responses. Everything else is healthy. At a 15s step only two or
+  three points land inside the burst, so it is easy to miss.
+seed: 3301
+duration: 30s
+resolution: 1s

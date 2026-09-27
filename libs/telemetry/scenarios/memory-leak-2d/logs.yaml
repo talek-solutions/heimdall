@@ -1,0 +1,90 @@
+streams:
+  - id: catalog_info
+    labels: { service_name: catalog, namespace: shop, level: info }
+    rate: { ref: catalog_http_rps_200, scale: 0.02 }
+    templates:
+      - line: 'level=INFO logger=c.s.catalog.ProductController msg="GET /api/products/\{id} 200" product_id=P-{int:100000-999999} duration_ms={ref:catalog_http_p50_seconds*1000} trace_id={traceId:catalog_get_product}'
+        weight: { baseline: 12 }
+      - line: 'level=INFO logger=c.s.catalog.ImageCache msg="rendition cached" product_id=P-{int:100000-999999} variant={pick:thumb|card|hero|zoom} cache_entries={ref:catalog_image_cache_entries}'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: ramp, at: 30m, to: 3, over: 0s }
+      - line: 'level=INFO logger=c.s.catalog.CatalogApplication msg="Started CatalogApplication in 13.{int:1-9} seconds (process running for 14.{int:1-9})" version=2.14.0'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: spike, at: 30m, to: 40, decay: 2m }
+            - { shape: spike, at: 6h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 12h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 18h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 24h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 30h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 36h30m, to: 40, decay: 2m }
+            - { shape: spike, at: 42h30m, to: 40, decay: 2m }
+
+  - id: catalog_gc
+    labels: { service_name: catalog, namespace: shop, level: warn }
+    rate: { ref: catalog_gc_time_ratio, scale: 6 }
+    templates:
+      - line: '[gc] GC({int:10000-99999}) Pause Young (Normal) (G1 Evacuation Pause) {ref:catalog_jvm_heap_used_bytes*0.000001}M->{ref:catalog_jvm_heap_used_bytes*0.00000097}M(3500M) {int:8-60}.{int:100-999}ms'
+        weight: { baseline: 10 }
+      - line: '[gc] GC({int:10000-99999}) Pause Full (G1 Compaction Pause) {ref:catalog_jvm_heap_used_bytes*0.000001}M->{ref:catalog_jvm_heap_used_bytes*0.00000099}M(3500M) {int:900-2400}.{int:100-999}ms'
+        weight: { ref: catalog_jvm_heap_used_bytes, scale: 0.00000001, offset: -26, clamp: { min: 0 } }
+
+  - id: catalog_error
+    labels: { service_name: catalog, namespace: shop, level: error }
+    rate: { ref: catalog_http_rps_503, scale: 0.5 }
+    templates:
+      - line: 'level=ERROR logger=c.s.catalog.ProductController msg="Request failed" status=503 path=/api/products/P-{int:100000-999999} error="java.lang.OutOfMemoryError: Java heap space" trace_id={traceId:catalog_get_product:error}'
+        weight: { baseline: 6 }
+      - line: 'level=ERROR logger=c.s.catalog.ImageCache msg="Failed to cache rendition" error="java.lang.OutOfMemoryError: Java heap space" cache_entries={ref:catalog_image_cache_entries}'
+        weight: { baseline: 3 }
+      - line: 'level=ERROR logger=c.s.catalog.ProductRepository msg="Mongo query failed" uri="mongodb://catalog_ro:Zq8pLm2Tn@catalog-mongo-0.catalog-mongo.data.svc:27017/catalog" error="MongoSocketReadTimeoutException"'
+        weight: { baseline: 0.3 }
+
+  - id: search
+    labels: { service_name: search, namespace: shop }
+    rate: { ref: search_http_rps_200, scale: 0.02 }
+    templates:
+      - line: 'level=INFO logger=c.s.search.QueryController msg="search served" hits={int:0-480} duration_ms={ref:search_http_p50_seconds*1000} trace_id={traceId:search_query}'
+        weight: { baseline: 1 }
+
+  - id: kubelet
+    labels: { service_name: kubelet, namespace: kube-system, node: ip-10-0-3-41 }
+    rate:
+      baseline: 0.02
+      phases:
+        - { shape: spike, at: 6h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 12h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 18h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 24h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 30h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 36h30m, to: 0.2, decay: 2m }
+        - { shape: spike, at: 42h30m, to: 0.2, decay: 2m }
+    templates:
+      - line: 'I0925 kubelet.go:2442] "SyncLoop (PLEG): event for pod" pod="shop/catalog-7d9f8b6c4-x2x9q" event={"ID":"{uuid}","Type":"ContainerStarted"}'
+        weight: { baseline: 1 }
+      - line: 'I0925 kuberuntime_container.go:779] "Killing container with a grace period" pod="shop/catalog-7d9f8b6c4-x2x9q" containerName="catalog" containerID="containerd://{hex:64}" reason="OOMKilled" gracePeriod=0'
+        weight:
+          baseline: 0
+          phases:
+            - { shape: spike, at: 6h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 12h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 18h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 24h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 30h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 36h30m, to: 3, decay: 2m }
+            - { shape: spike, at: 42h30m, to: 3, decay: 2m }
+
+series:
+  - id: catalog_error_lines_count
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: catalog, level: error }
+    scaleByRange: true
+    curve: { ref: catalog_http_rps_503, scale: 0.5 }
+  - id: catalog_gc_lines_count
+    match: 'count_over_time\(\s*\{'
+    labels: { service_name: catalog, level: warn }
+    scaleByRange: true
+    curve: { ref: catalog_gc_time_ratio, scale: 6 }

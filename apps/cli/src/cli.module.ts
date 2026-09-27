@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LlmModule } from '@heimdall/llm';
 import { HeimdallConfigModule } from '@heimdall/config';
+import { TelemetryDatasourceConfigModule } from '@heimdall/telemetry';
 import { ConfigCommand } from './commands/config/config.command';
 import { VersionCommand } from './commands/version/version.command';
 import { CliConfigService } from './config/cli-config.service';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
+import { FixtureModeNotice } from './presentation/fixture-mode.notice';
 import { Streams } from './presentation/streams';
 
 /**
@@ -16,7 +18,19 @@ import { Streams } from './presentation/streams';
 @Module({
   // forRoot() runs when this file is imported, so `.env` is in process.env
   // before any provider factory executes. Existing variables win over the file.
-  imports: [ConfigModule.forRoot({ isGlobal: true }), LlmModule, HeimdallConfigModule],
-  providers: [Streams, ExitCodeContract, CliConfigService, ConfigCommand, VersionCommand],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    LlmModule,
+    HeimdallConfigModule,
+    TelemetryDatasourceConfigModule,
+  ],
+  providers: [
+    Streams,
+    ExitCodeContract,
+    FixtureModeNotice,
+    CliConfigService,
+    ConfigCommand,
+    VersionCommand,
+  ],
 })
 export class CliModule {}
