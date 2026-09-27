@@ -1,13 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
+import { HEIMDALL_HOME_DIRNAME, heimdallHomeDir } from '@heimdall/core';
 import { ConfigEnvVariable } from './enums';
 
-export const HEIMDALL_HOME_DIRNAME = '.heimdall';
+export { HEIMDALL_HOME_DIRNAME };
 export const CONFIG_FILENAME = 'config.yaml';
 
-// macOS only for now: no XDG or Windows locations.
 export function defaultConfigPath(homeDir: string = os.homedir()): string {
-  return path.join(homeDir, HEIMDALL_HOME_DIRNAME, CONFIG_FILENAME);
+  return path.join(heimdallHomeDir(homeDir), CONFIG_FILENAME);
 }
 
 export function resolveConfigPath(env: NodeJS.ProcessEnv, homeDir: string = os.homedir()): string {

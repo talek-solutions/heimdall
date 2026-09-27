@@ -15,9 +15,20 @@
     "./errors": {
       "types": "./src/errors/index.ts",
       "default": "./dist/errors/index.js"
+    },
+    "./manifest": {
+      "types": "./src/manifest/index.ts",
+      "default": "./dist/manifest/index.js"
     }
   },
   "scripts": {
     "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.2.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "reflect-metadata": "^0.2.2",
+    "yaml": "^2.9.1"
   }
 }

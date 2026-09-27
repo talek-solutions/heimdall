@@ -114,7 +114,9 @@ steps, metric definitions, indicators. Each resource carries a content hash of i
 canonical form, used for versioning, caching and re-derivation.
 
 A worked system — manifest, graph, model view and two walks — is in
-[`.docs/manifests/shop`](../manifests/shop/README.md).
+[`.docs/manifests/shop`](../manifests/shop/README.md). The v1 reader and parser, a single
+`~/.heimdall/manifest.yaml` for now, are specified in
+[`.docs/schema/heimdall-manifest.md`](../schema/heimdall-manifest.md).
 
 ## Consequences
 

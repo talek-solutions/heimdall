@@ -3,3 +3,4 @@ export { LogLevel } from './enums/log-level.enum';
 export { OutputFormat } from './enums/output-format.enum';
 export type { ErrorResponse } from './errors/error-response.model';
 export { HeimdallError, isHeimdallError } from './errors/heimdall.error';
+export { HEIMDALL_HOME_DIRNAME, heimdallHomeDir } from './home/heimdall-home';
