@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LlmModule } from '@heimdall/llm';
 import { HeimdallConfigModule } from '@heimdall/config';
+import { ManifestModule } from '@heimdall/core/manifest';
+import { InvestigationModule } from '@heimdall/investigation';
 import { TelemetryDatasourceConfigModule } from '@heimdall/telemetry';
 import { ConfigCommand } from './commands/config/config.command';
+import { InvestigateCommand } from './commands/investigate/investigate.command';
 import { VersionCommand } from './commands/version/version.command';
 import { CliConfigService } from './config/cli-config.service';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
@@ -23,6 +26,8 @@ import { Streams } from './presentation/streams';
     LlmModule,
     HeimdallConfigModule,
     TelemetryDatasourceConfigModule,
+    ManifestModule,
+    InvestigationModule,
   ],
   providers: [
     Streams,
@@ -30,6 +35,7 @@ import { Streams } from './presentation/streams';
     FixtureModeNotice,
     CliConfigService,
     ConfigCommand,
+    InvestigateCommand,
     VersionCommand,
   ],
 })

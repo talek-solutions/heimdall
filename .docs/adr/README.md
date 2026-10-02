@@ -44,3 +44,4 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0013](0013-user-level-kubeconfig-style-config.md) | User-level, kubeconfig-style configuration | Accepted |
 | [0014](0014-fixture-datasources.md) | Fixture datasources behind the connectors' fetch | Accepted |
 | [0015](0015-system-manifest-as-a-traversable-graph.md) | System manifest as a traversable graph | Proposed |
+| [0016](0016-investigation-init-phase.md) | Investigation init phase: model-classified entry, deterministic scope and plan | Proposed |

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ExitCode } from '@heimdall/core';
+import { ManifestError, ManifestErrorCode } from '@heimdall/core/manifest';
+import { InvestigationError, InvestigationErrorCode } from '@heimdall/investigation';
 import { LlmError, LlmErrorCode } from '@heimdall/llm';
 import { ConfigError, ConfigErrorCode } from '@heimdall/config';
 import { TelemetryError, TelemetryErrorCode } from '@heimdall/telemetry';
@@ -35,6 +37,29 @@ describe('exitCodeForError', () => {
     ]) {
       assert.equal(exitCodeForError(new TelemetryError(code, 'x')), ExitCode.Usage, code);
     }
+  });
+
+  it('maps manifest failures and investigation input errors to Usage', () => {
+    for (const code of Object.values(ManifestErrorCode)) {
+      assert.equal(exitCodeForError(new ManifestError(code, 'x')), ExitCode.Usage, code);
+    }
+    for (const code of [
+      InvestigationErrorCode.InvalidConfig,
+      InvestigationErrorCode.EmptyQuery,
+      InvestigationErrorCode.InvalidWindow,
+      InvestigationErrorCode.EnvironmentUnknown,
+      InvestigationErrorCode.EntryNotFound,
+      InvestigationErrorCode.EntryAmbiguous,
+    ]) {
+      assert.equal(exitCodeForError(new InvestigationError(code, 'x')), ExitCode.Usage, code);
+    }
+  });
+
+  it('maps a classification that stays invalid to Unexpected', () => {
+    assert.equal(
+      exitCodeForError(new InvestigationError(InvestigationErrorCode.TriageFailed, 'x')),
+      ExitCode.Unexpected,
+    );
   });
 
   it('maps missing or rejected LLM credentials to ProviderAuth', () => {

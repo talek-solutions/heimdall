@@ -1,3 +1,4 @@
+import { createInterface } from 'node:readline/promises';
 import { Injectable } from '@nestjs/common';
 
 /**
@@ -49,5 +50,16 @@ export class Streams {
   /** True when stdin is a terminal. Prompting is forbidden when this is false. */
   canPrompt(): boolean {
     return stdinIsTty();
+  }
+
+  /** Asks on stderr, so a prompt never lands in piped data. Callers check `canPrompt()` first. */
+  async ask(question: string): Promise<string> {
+    const prompt = createInterface({ input: process.stdin, output: process.stderr });
+
+    try {
+      return await prompt.question(question);
+    } finally {
+      prompt.close();
+    }
   }
 }

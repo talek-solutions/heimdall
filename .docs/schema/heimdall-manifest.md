@@ -89,5 +89,5 @@ indicator derivation.
 | `MANIFEST_UNSUPPORTED_VERSION` | an `apiVersion` other than `heimdall/v1`, or more than one in the file |
 | `MANIFEST_INVALID` | no documents, a non-mapping document, a missing `apiVersion`, or any validation issue |
 
-The CLI does not load a manifest yet; these codes join its exit-code mapping with the first
-command that does.
+`heimdall investigate` is the first command that loads the manifest; every code above exits 2
+([investigation-plan.md](investigation-plan.md)).

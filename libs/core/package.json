@@ -19,6 +19,10 @@
     "./manifest": {
       "types": "./src/manifest/index.ts",
       "default": "./dist/manifest/index.js"
+    },
+    "./graph": {
+      "types": "./src/graph/index.ts",
+      "default": "./dist/graph/index.js"
     }
   },
   "scripts": {

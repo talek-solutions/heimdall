@@ -1,4 +1,6 @@
 import { ExitCode, isHeimdallError, type ErrorResponse } from '@heimdall/core';
+import { ManifestErrorCode } from '@heimdall/core/manifest';
+import { InvestigationErrorCode } from '@heimdall/investigation';
 import { LlmErrorCode } from '@heimdall/llm';
 import { ConfigErrorCode } from '@heimdall/config';
 import { TelemetryErrorCode } from '@heimdall/telemetry';
@@ -12,6 +14,13 @@ import { CliErrorCode } from './cli-error-code.enum';
 const USAGE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   ...Object.values(ConfigErrorCode),
   ...Object.values(CliErrorCode),
+  ...Object.values(ManifestErrorCode),
+  InvestigationErrorCode.InvalidConfig,
+  InvestigationErrorCode.EmptyQuery,
+  InvestigationErrorCode.InvalidWindow,
+  InvestigationErrorCode.EnvironmentUnknown,
+  InvestigationErrorCode.EntryNotFound,
+  InvestigationErrorCode.EntryAmbiguous,
   LlmErrorCode.INVALID_PROVIDER,
   TelemetryErrorCode.InvalidDatasourceConfig,
   TelemetryErrorCode.FixtureScenarioNotFound,

@@ -1,0 +1,181 @@
+# Reference system manifest shaped after the telemetry fixture scenarios in
+# libs/telemetry/scenarios (error-burst-30s, increased-latency-1, healthy-baseline): the
+# same services, metric names and labels, so an investigation can run end to end against
+# fixtures. See README.md in this folder.
+apiVersion: heimdall/v1
+kind: System
+metadata: { name: storefront }
+spec:
+  description: Web checkout with stock reservation and card payments
+  environments:
+    - name: prod
+      context: prod
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: web, system: storefront }
+spec:
+  type: frontend
+  description: The storefront in the browser; emits no telemetry of its own
+  dependsOn:
+    - name: checkout-api
+      target: checkout
+      transport: http
+      mode: sync
+      criticality: hard
+      operations: ['POST /api/checkout']
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: checkout, system: storefront }
+spec:
+  type: service
+  exposes:
+    - { transport: http, route: /api/checkout }
+  telemetry:
+    logs: { selector: '{service_name="checkout"}', fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId } }
+    metrics: { matchers: { service: checkout } }
+    traces: { serviceName: checkout }
+  metrics:
+    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }
+    - { name: db_client_operation_duration_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { db_operation_name: operation, db_collection_name: table } }
+    - { name: db_client_connections_usage, type: gauge, role: saturation, description: Connections in use in the orders-pg pool }
+    - { name: db_client_connections_pending_requests, type: gauge, role: saturation, description: Requests waiting for an orders-pg connection }
+  dependsOn:
+    - name: reserve-stock
+      target: inventory
+      transport: http
+      mode: sync
+      criticality: hard
+      operations: ['POST /reserve']
+    - name: orders-db
+      target: orders-pg
+      transport: sql
+      mode: sync
+      criticality: hard
+      operations: [UPDATE, SELECT]
+      config: { poolSize: 50 }
+    - name: charge
+      target: payments
+      transport: http
+      mode: sync
+      criticality: hard
+      operations: ['POST /charges']
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: payments, system: storefront }
+spec:
+  type: service
+  exposes:
+    - { transport: http, route: /charges }
+  telemetry:
+    logs: { selector: '{service_name="payments"}', fields: { level: severity, msg: message, trace_id: traceId, payment_id: paymentId } }
+    metrics: { matchers: { service: payments } }
+    traces: { serviceName: payments }
+  metrics:
+    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }
+    - { name: http_client_request_duration_seconds, type: histogram, unit: seconds, measures: { outbound: provider }, labels: { http_request_method: method, http_response_status_code: statusCode } }
+  dependsOn:
+    - name: provider
+      target: payment-provider
+      transport: http
+      mode: sync
+      criticality: hard
+      operations: ['POST /v1/payment_intents']
+      config: { maxAttempts: 3 }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: inventory, system: storefront }
+spec:
+  type: service
+  exposes:
+    - { transport: http, route: /reserve }
+  telemetry:
+    logs: { selector: '{service_name="inventory"}', fields: { level: severity, msg: message } }
+    metrics: { matchers: { service: inventory } }
+    traces: { serviceName: inventory }
+  metrics:
+    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }
+  dependsOn:
+    - name: stock-cache
+      target: stock-cache
+      transport: redis
+      mode: sync
+      criticality: soft
+      role: cache-aside
+      operations: [GET]
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: stock-cache, system: storefront }
+spec:
+  type: cache
+  engine: redis
+  description: Stock levels cached in front of inventory's own database
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: payment-provider, system: storefront }
+spec:
+  type: vendor
+  description: External card processor at api.stripe.com; observed only through payments' client metrics
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: orders-pg, system: storefront }
+spec:
+  type: datastore
+  engine: postgresql
+  telemetry:
+    logs: { selector: '{service_name="orders-pg"}', fields: { level: severity, msg: message } }
+    metrics: { matchers: { datname: orders } }
+  dataModel:
+    - { kind: table, name: orders }
+  metrics:
+    - { name: pg_stat_activity_count, type: gauge, role: saturation }
+    - { name: pg_locks_count, type: gauge, role: saturation }
+    - { name: pg_stat_activity_max_tx_duration, type: gauge, unit: seconds }
+  indicators:
+    - { metric: pg_stat_activity_max_tx_duration, role: saturation, expect: { kind: threshold, max: 30 } }
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata: { name: orders-reconcile, system: storefront }
+spec:
+  type: worker
+  description: Periodic batch job reconciling orders against payments
+  telemetry:
+    logs: { selector: '{service_name="orders-reconcile"}', fields: { level: severity, msg: message } }
+  dependsOn:
+    - name: orders-db
+      target: orders-pg
+      transport: sql
+      mode: sync
+      criticality: hard
+      operations: [UPDATE, SELECT]
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata: { name: checkout, system: storefront }
+spec:
+  description: Customers pay for their cart and an order is placed
+  flows: [place-order]
+  indicators:
+    - { metric: checkout/http_server_request_duration_seconds, role: kpi, expect: { kind: baseline }, description: Checkout requests served }
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata: { name: place-order, system: storefront }
+spec:
+  description: The browser submits the cart; checkout reserves stock, records the order and charges the card
+  mode: sync
+  steps:
+    - { dependency: web/checkout-api, match: { route: /api/checkout, method: POST } }
+    - { dependency: checkout/reserve-stock, match: { route: /reserve, method: POST } }
+    - { dependency: checkout/orders-db, match: { operation: UPDATE, table: orders } }
+    - { dependency: checkout/charge, match: { route: /charges, method: POST } }
+    - { dependency: payments/provider, match: { method: POST } }
+  indicators:
+    - { metric: checkout/http_server_request_duration_seconds, role: latency, expect: { kind: slo, p99: 1 } }
