@@ -66,11 +66,14 @@ reported as itself rather than as broken references everywhere else.
 - `dependsOn[].target` is a declared component.
 - `measures.outbound` is a dependency of the same component; `measures.inbound` is a transport
   the component `exposes`.
+- No two `labels` of a metric share a meaning, so a selector on that meaning names one label.
 - A `primary-replica` topology has exactly one `primary` member; `replication` appears only there.
 - `Functionality.spec.flows` name declared flows.
 - A step's `dependency` is `component/dependency` and resolves.
 - Indicator metrics resolve: a bare name against the owning component (component and member
   indicators), otherwise `component/metric`, which functionalities, flows and steps must use.
+- A step indicator is narrowed by the step's `match`, so each metric it reads (both sides of a
+  ratio) has a label for every meaning the `match` uses, unless the indicator has a `query`.
 
 Not checked here: environment `context` against `~/.heimdall/config.yaml`, coverage lint, and
 indicator derivation.

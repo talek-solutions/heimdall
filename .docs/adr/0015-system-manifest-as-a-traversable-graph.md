@@ -88,6 +88,15 @@ Step and component indicators are **derived** from definitions whose labels cove
 step's `match`. Users declare only what cannot be inferred — KPIs, end-to-end timings,
 thresholds. Derived indicators carry `provenance: derived`.
 
+Metric definitions are not vertices: nothing traverses to a metric, an indicator only looks
+it up. The compiled graph keeps them as a **catalogue** keyed by `component/metric`, the name
+indicators reference, with the emitting component, type, unit and label meanings. That is what
+turns an indicator into a query: the type picks the template, the labels turn a selector's
+meanings into label names, and the emitting component, which is not necessarily the
+indicator's subject, gives the telemetry identity. Validation guarantees every selector
+translates: a meaning names at most one label of a metric, and a declared step indicator's
+metrics label every meaning of the step's `match` unless the indicator brings its own `query`.
+
 ### Traversal is Heimdall's job
 
 - `locate(query)` — exact identifier match (names, telemetry labels from an alert), then

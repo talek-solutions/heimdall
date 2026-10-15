@@ -7,6 +7,7 @@ import type {
   IGraphVertex,
   IImpact,
   IIndicatorVertex,
+  IMetricDefinition,
   IStepVertex,
   ISubgraph,
   IVertexOfType,
@@ -40,15 +41,19 @@ export class SystemGraph {
   private readonly byId: ReadonlyMap<string, IGraphVertex>;
   private readonly outgoingById: ReadonlyMap<string, readonly IGraphEdge[]>;
   private readonly incomingById: ReadonlyMap<string, readonly IGraphEdge[]>;
+  private readonly metricsByReference: ReadonlyMap<string, IMetricDefinition>;
 
+  /** Metrics are a catalogue beside the vertices: indicators look them up, nothing walks there. */
   constructor(
     readonly system: ISystemInfo,
     readonly vertices: readonly IGraphVertex[],
     readonly edges: readonly IGraphEdge[],
+    readonly metrics: readonly IMetricDefinition[] = [],
   ) {
     this.byId = new Map(vertices.map((vertex) => [vertex.id, vertex]));
     this.outgoingById = this.group(edges, (edge) => edge.from);
     this.incomingById = this.group(edges, (edge) => edge.to);
+    this.metricsByReference = new Map(metrics.map((metric) => [metric.reference, metric]));
   }
 
   vertex(id: string): IGraphVertex | undefined {
@@ -79,6 +84,19 @@ export class SystemGraph {
       const indicator = this.vertexOfType(edge.from, VertexType.Indicator);
       return indicator === undefined ? [] : [indicator];
     });
+  }
+
+  /** By the `component/metric` name an indicator's `metric` or `ratio` holds. */
+  metric(reference: string): IMetricDefinition | undefined {
+    return this.metricsByReference.get(reference);
+  }
+
+  /** What a component emits; empty for any other vertex. */
+  metricsOf(id: string): IMetricDefinition[] {
+    const component = this.vertexOfType(id, VertexType.Component);
+    return component === undefined
+      ? []
+      : this.metrics.filter((metric) => metric.component === component.name);
   }
 
   /** Ordered steps of a flow, or of every flow realising a functionality; empty otherwise. */

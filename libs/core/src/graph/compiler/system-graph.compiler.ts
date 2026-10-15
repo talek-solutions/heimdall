@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { MemberRole, TopologyMode } from '../../manifest/enums';
 import type { IComponentV1, IFlowV1, IManifestV1 } from '../../manifest/interfaces/v1';
+import { qualify } from '../../manifest/parsers/v1/manifest-index-v1';
 import { EdgeType, VertexType } from '../enums';
-import type { IGraphEdge, IGraphVertex } from '../interfaces';
+import type { IGraphEdge, IGraphVertex, IMetricDefinition } from '../interfaces';
 import { SystemGraph } from '../system-graph';
 import { VertexIds, vertexId } from '../vertex-id';
 import { IndicatorDeriver } from './indicator.deriver';
@@ -44,7 +45,12 @@ export class SystemGraphCompiler {
 
     const { name } = manifest.system.metadata;
     const { description, environments } = manifest.system.spec;
-    return new SystemGraph({ name, description, environments }, vertices, edges);
+    return new SystemGraph(
+      { name, description, environments },
+      vertices,
+      edges,
+      this.metrics(manifest),
+    );
   }
 
   private addFlow(flow: IFlowV1, vertices: IGraphVertex[], link: Link): void {
@@ -160,5 +166,18 @@ export class SystemGraphCompiler {
       vertices.push({ id, type: VertexType.Indicator, ...draft });
       link(EdgeType.Measures, id, draft.subject);
     }
+  }
+
+  private metrics(manifest: IManifestV1): IMetricDefinition[] {
+    return manifest.components.flatMap(({ metadata, spec }) =>
+      spec.metrics.map(({ name, type, unit, labels }) => ({
+        reference: qualify(metadata.name, name),
+        component: metadata.name,
+        name,
+        type,
+        unit,
+        labels,
+      })),
+    );
   }
 }

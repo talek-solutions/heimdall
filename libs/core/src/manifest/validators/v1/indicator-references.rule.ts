@@ -1,6 +1,7 @@
 import type { IManifestIssue } from '../../interfaces/manifest-issue.interface';
 import type { IIndicatorV1, IManifestResourceV1, IManifestV1 } from '../../interfaces/v1';
 import { qualify, splitReference, type ManifestIndexV1 } from '../../parsers/v1/manifest-index-v1';
+import { indicatorMetrics } from './indicator-metrics';
 import { issueAt, listNames } from './issue-at';
 import type { IManifestRuleV1 } from './manifest-rule-v1.interface';
 
@@ -20,7 +21,7 @@ export class IndicatorReferencesRule implements IManifestRuleV1 {
   validate(manifest: IManifestV1, index: ManifestIndexV1): IManifestIssue[] {
     return this.attachments(manifest).flatMap(({ resource, path, owner, indicators }) =>
       indicators.flatMap((indicator, position) =>
-        this.references(indicator).flatMap(([field, reference]) => {
+        indicatorMetrics(indicator).flatMap(([field, reference]) => {
           const problem = this.resolve(reference, owner, index);
           return problem === undefined
             ? []
@@ -65,16 +66,6 @@ export class IndicatorReferencesRule implements IManifestRuleV1 {
         })),
       ]),
     ];
-  }
-
-  private references(indicator: IIndicatorV1): (readonly [string, string])[] {
-    if (indicator.ratio !== undefined) {
-      return [
-        ['ratio.numerator', indicator.ratio.numerator],
-        ['ratio.denominator', indicator.ratio.denominator],
-      ];
-    }
-    return indicator.metric === undefined ? [] : [['metric', indicator.metric]];
   }
 
   private resolve(

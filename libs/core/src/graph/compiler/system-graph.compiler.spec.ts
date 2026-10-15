@@ -13,7 +13,11 @@ import {
   ReferenceManifest,
 } from '../__fixtures__/reference-manifests.fixture';
 import { EdgeType, IndicatorProvenance, VertexType } from '../enums';
+import type { IIndicatorVertex } from '../interfaces';
+import { labelMatchers } from '../metric-labels';
 import type { SystemGraph } from '../system-graph';
+import { VertexIds } from '../vertex-id';
+import { describeSelector } from '../views/level-zero.view';
 import { SystemGraphCompiler } from './system-graph.compiler';
 
 function countBy<T>(items: readonly T[], key: (item: T) => string): Record<string, number> {
@@ -22,6 +26,13 @@ function countBy<T>(items: readonly T[], key: (item: T) => string): Record<strin
     counts[key(item)] = (counts[key(item)] ?? 0) + 1;
   }
   return counts;
+}
+
+function metricReferences({ metric, ratio }: IIndicatorVertex): string[] {
+  if (ratio !== undefined) {
+    return [ratio.numerator, ratio.denominator];
+  }
+  return metric === undefined ? [] : [metric];
 }
 
 describe('SystemGraphCompiler on the shop reference manifest', () => {
@@ -169,4 +180,68 @@ describe('SystemGraphCompiler on the checkout reference manifest', () => {
     assert.equal(indicator?.metric, 'payments/http_client_request_duration_seconds');
     assert.deepEqual(graph.indicatorsOf('component:payment-provider'), []);
   });
+});
+
+describe('SystemGraphCompiler metric catalogue', () => {
+  let graph: SystemGraph;
+
+  before(async () => {
+    graph = await compileReferenceManifest(ReferenceManifest.Checkout);
+  });
+
+  it('keeps each metric definition under the name indicators reference it by', () => {
+    assert.deepEqual(graph.metric('checkout/http_server_request_duration_seconds'), {
+      reference: 'checkout/http_server_request_duration_seconds',
+      component: 'checkout',
+      name: 'http_server_request_duration_seconds',
+      type: MetricType.Histogram,
+      unit: 'seconds',
+      labels: {
+        http_route: LabelSemantic.Route,
+        http_request_method: LabelSemantic.Method,
+        http_response_status_code: LabelSemantic.StatusCode,
+      },
+    });
+    assert.equal(graph.metric('checkout/pg_locks_count'), undefined);
+  });
+
+  it('lists the metrics a component emits', () => {
+    assert.deepEqual(
+      graph.metricsOf('component:orders-pg').map((metric) => metric.name),
+      ['pg_stat_activity_count', 'pg_locks_count', 'pg_stat_activity_max_tx_duration'],
+    );
+    assert.deepEqual(graph.metricsOf('component:web'), []);
+    assert.deepEqual(graph.metricsOf('flow:place-order'), []);
+  });
+});
+
+describe('Reference manifest indicators translate to queries from the graph alone', () => {
+  for (const name of Object.values(ReferenceManifest)) {
+    it(`resolves the metric, its emitter and a label per selector meaning in ${name}`, async () => {
+      const graph = await compileReferenceManifest(name);
+      const generated = graph
+        .ofType(VertexType.Indicator)
+        .filter((indicator) => indicator.query === undefined);
+
+      assert.notEqual(generated.length, 0);
+      for (const indicator of generated) {
+        const references = metricReferences(indicator);
+
+        assert.notEqual(references.length, 0, indicator.id);
+        for (const reference of references) {
+          const metric = graph.metric(reference);
+
+          assert.ok(metric, `${indicator.id}: no definition for ${reference}`);
+          assert.ok(
+            graph.vertexOfType(VertexIds.component(metric.component), VertexType.Component),
+            `${indicator.id}: ${reference} has no emitting component`,
+          );
+          assert.ok(
+            labelMatchers(metric, indicator.selector),
+            `${indicator.id}: ${reference} has no label for ${describeSelector(indicator.selector)}`,
+          );
+        }
+      }
+    });
+  }
 });

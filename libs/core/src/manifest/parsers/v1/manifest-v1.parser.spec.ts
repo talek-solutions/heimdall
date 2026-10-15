@@ -269,6 +269,34 @@ describe('ManifestV1Parser: references', () => {
     );
   });
 
+  it('rejects metric labels sharing a meaning', async () => {
+    await assert.rejects(
+      reader.parse(
+        SHOP.replace(
+          'labels: { route: route, method: method, status: statusCode }',
+          'labels: { route: route, path: route, method: method, status: statusCode }',
+        ),
+      ),
+      isInvalid(
+        'Component/services-2 spec.metrics.0.labels: labels route, path share the meaning route',
+      ),
+    );
+  });
+
+  it('rejects a declared step indicator whose metric cannot be narrowed to the step', async () => {
+    await assert.rejects(
+      reader.parse(
+        SHOP.replace(
+          'labels: { topic: topic, consumergroup: consumerGroup }',
+          'labels: { topic: topic }',
+        ),
+      ),
+      isInvalid(
+        'Flow/fulfil-order spec.steps.0.indicators.0.metric: kafka/kafka_consumergroup_lag has no label meaning consumerGroup',
+      ),
+    );
+  });
+
   it('reports assembly problems before reference problems', async () => {
     const broken = SHOP.replace(
       'metadata: { name: kafka, system: shop }',

@@ -1,4 +1,5 @@
 export type { IGraphEdge } from './edge.interface';
+export type { IMetricDefinition } from './metric.interface';
 export type { IFlowPath, IImpact, ISubgraph } from './traversal.interface';
 export type {
   IComponentVertex,
