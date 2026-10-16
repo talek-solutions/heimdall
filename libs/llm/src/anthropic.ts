@@ -3,6 +3,7 @@ export * from './providers/anthropic/anthropic.enums';
 export * from './providers/anthropic/anthropic.constants';
 export type { AnthropicProviderOptions } from './providers/anthropic/anthropic.options';
 export { AnthropicProvider } from './providers/anthropic/anthropic.provider';
+export { AnthropicToolPort } from './providers/anthropic/anthropic.tool-port';
 export * from './providers/anthropic/api/messages.enums';
 export * from './providers/anthropic/api/messages.shared';
 export * from './providers/anthropic/api/messages.request';

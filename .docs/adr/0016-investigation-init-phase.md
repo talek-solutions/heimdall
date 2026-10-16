@@ -143,3 +143,17 @@ start is cheap next to the execution loop.
 **Will regret if:** the model's classification quality is poor on real vocabularies and
 aliases turn out to be needed anyway. Then the aliases option comes back as a tier before the
 model, not instead of it.
+
+## Amendment (2026-10-16): execution is an agent loop
+
+The Emit section says the execution phase applies the origin rule to decide which explain and
+corroborate checks run. [ADR 0018](0018-investigation-execution-on-the-agent-runtime.md) makes
+execution an agent loop on the runtime of [ADR 0017](0017-agent-runtime-loop-tools-budgets-tracing.md)
+instead: the plan seeds the agent, the agent applies the origin rule and chooses the checks, and
+code validates the conclusion, including that verdicts and the chosen origin agree. The plan's
+format, its tiers and the `when` conditions are unchanged; they are now the agent's starting
+point rather than a fixed script.
+
+The Consequences claim that "one model call per investigation start is cheap next to the
+execution loop" still holds for the init phase; the execution loop's cost is bounded by the
+budgets of ADR 0017.

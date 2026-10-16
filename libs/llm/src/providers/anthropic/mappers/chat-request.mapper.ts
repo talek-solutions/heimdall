@@ -8,7 +8,7 @@ import {
     LLMToolChoiceType,
 } from '../../interfaces/chat.enums';
 import type { ILLMMessage, ILLMProviderMessageRequest, ILLMToolChoice, ILLMToolDefinition } from '../../interfaces/chat.request';
-import type { ILLMImagePart, ILLMInputContentPart, ILLMToolResultPart } from '../../interfaces/chat.shared';
+import type { ILLMImagePart, ILLMInputContentPart, ILLMReasoningPart, ILLMToolResultPart } from '../../interfaces/chat.shared';
 import { DEFAULT_ANTHROPIC_MAX_TOKENS } from '../anthropic.constants';
 import { AnthropicModel } from '../anthropic.enums';
 import type { AnthropicProviderOptions } from '../anthropic.options';
@@ -150,7 +150,24 @@ function toBlock(part: ILLMInputContentPart, role: LLMMessageRole): AnthropicCon
             return { type: AnthropicContentBlockType.TOOL_USE, id: part.id, name: part.name, input: part.input };
         case LLMContentPartType.TOOL_RESULT:
             throw new LlmError(LlmErrorCode.UNSUPPORTED_REQUEST, 'TOOL_RESULT parts must be sent in a TOOL message');
+        case LLMContentPartType.REASONING:
+            if (role !== LLMMessageRole.ASSISTANT) {
+                throw new LlmError(LlmErrorCode.UNSUPPORTED_REQUEST, 'REASONING parts are only valid in ASSISTANT messages');
+            }
+            return toThinkingBlock(part);
     }
+}
+
+/** Echoes a response's reasoning back exactly as received, which thinking-enabled tool loops require. */
+function toThinkingBlock(part: ILLMReasoningPart): AnthropicContentBlock {
+    if (part.redactedData !== undefined) {
+        return { type: AnthropicContentBlockType.REDACTED_THINKING, data: part.redactedData };
+    }
+    return {
+        type: AnthropicContentBlockType.THINKING,
+        thinking: part.text,
+        ...(part.signature !== undefined ? { signature: part.signature } : {}),
+    };
 }
 
 function toImageBlock(part: ILLMImagePart): AnthropicImageBlock {

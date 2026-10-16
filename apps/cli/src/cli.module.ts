@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AgentModule } from '@heimdall/agent';
 import { LlmModule } from '@heimdall/llm';
 import { HeimdallConfigModule } from '@heimdall/config';
 import { ManifestModule } from '@heimdall/core/manifest';
@@ -24,6 +25,7 @@ import { Streams } from './presentation/streams';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     LlmModule,
+    AgentModule,
     HeimdallConfigModule,
     TelemetryDatasourceConfigModule,
     ManifestModule,

@@ -53,18 +53,26 @@ export interface ILLMToolResultPart {
     isError?: boolean;
 }
 
-/** Model reasoning as exposed by the provider. May be empty or summarized. */
+/**
+ * Model reasoning as exposed by the provider. May be empty or summarized. Send it back unchanged
+ * in the assistant turn it came from: providers that think between tool calls require it.
+ */
 export interface ILLMReasoningPart {
     type: LLMContentPartType.REASONING;
     text: string;
+    /** Opaque provider proof that the reasoning is unmodified. */
+    signature?: string;
+    /** Opaque reasoning the provider withheld; `text` is then empty. */
+    redactedData?: string;
 }
 
-/** Parts a caller may place in request messages. */
+/** Parts a caller may place in request messages. REASONING belongs only in ASSISTANT messages. */
 export type ILLMInputContentPart =
     | ILLMTextPart
     | ILLMImagePart
     | ILLMToolCallPart
-    | ILLMToolResultPart;
+    | ILLMToolResultPart
+    | ILLMReasoningPart;
 
 /** Parts a provider may return in the response. */
 export type ILLMOutputContentPart =

@@ -17,9 +17,9 @@ heimdall investigate "checkouts are not working" --env prod
 
 | # | The user can… | Status | Where |
 |---|---|---|---|
-| 1 | Receive real-time or near-real-time information in the investigation | in progress | The window is anchored at "now" (the fixture anchor in fixture mode) and compared with the preceding window ([0016](../adr/0016-investigation-init-phase.md)); live queries are the execution phase |
-| 2 | See how signals correlate and how the investigation traverses the system | in progress | The init phase emits the located entry, the scoped subgraph and the check plan as typed events ([0016](../adr/0016-investigation-init-phase.md), [0006](../adr/0006-cli-output-contract.md)); the CLI renders them. A console view is not started |
-| 3 | Get concise mitigations, from manual intervention to long-term prevention, with trade-offs | not started | Produced at the end of the execution phase |
+| 1 | Receive real-time or near-real-time information in the investigation | in progress | The window is anchored at "now" (the fixture anchor in fixture mode) and compared with the preceding window ([0016](../adr/0016-investigation-init-phase.md)); live queries are the execution phase ([0018](../adr/0018-investigation-execution-on-the-agent-runtime.md), stories [0018-01](../stories/0018-investigation-execution/01-metrics-investigation.md) and [0018-02](../stories/0018-investigation-execution/02-logs-and-traces-evidence.md)) |
+| 2 | See how signals correlate and how the investigation traverses the system | in progress | The init phase emits the located entry, the scoped subgraph and the check plan as typed events ([0016](../adr/0016-investigation-init-phase.md), [0006](../adr/0006-cli-output-contract.md)); the CLI renders them. A console view is not started. The execution phase adds per-check events and a trace per run ([0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md), story [0017-03](../stories/0017-agent-runtime/03-agent-observability-and-tracing.md)) |
+| 3 | Get concise mitigations, from manual intervention to long-term prevention, with trade-offs | planned | Produced at the end of the execution phase ([0018](../adr/0018-investigation-execution-on-the-agent-runtime.md), story [0018-03](../stories/0018-investigation-execution/03-mitigations-and-report.md)) |
 | 4 | Connect observability, limited data sources, source code, notes and documentation | in progress | Observability through connectors ([0009](../adr/0009-grafana-stack-first.md)); the system manifest describes how the parts connect ([0015](../adr/0015-system-manifest-as-a-traversable-graph.md)). Code, notes and documentation are not started |
 | 5 | Benefit from past incidents, since most incidents resemble earlier ones | seam | Past-incident priors are meant to re-rank entry candidates and checks; nothing stores incidents yet |
 | 6 | Use predefined runbooks, and search beyond them when allowed | seam | A runbook attached to a manifest vertex is meant to join the scope; runbooks are not modelled yet |
@@ -32,6 +32,8 @@ heimdall investigate "checkouts are not working" --env prod
   and an ordered plan of checks. It sends the model only the query and the manifest's compact
   index, never telemetry. See [0016](../adr/0016-investigation-init-phase.md).
 - **The execution phase** runs the checks, correlates the results and proposes mitigations
-  (items 1, 2, 3). It is next.
+  (items 1, 2, 3): an agent loop on the runtime of [0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md),
+  starting from the plan ([0018](../adr/0018-investigation-execution-on-the-agent-runtime.md)). Its
+  delivery slices are in [`.docs/stories`](../stories/README.md).
 - The MVP cut across items is still to be confirmed; the statuses above describe the work, not
   the cut.

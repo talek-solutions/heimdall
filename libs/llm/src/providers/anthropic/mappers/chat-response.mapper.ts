@@ -13,7 +13,7 @@ const FINISH_REASON_BY_STOP_REASON: Readonly<Record<AnthropicStopReason, LLMFini
     [AnthropicStopReason.MAX_TOKENS]: LLMFinishReason.LENGTH,
     [AnthropicStopReason.TOOL_USE]: LLMFinishReason.TOOL_CALLS,
     [AnthropicStopReason.REFUSAL]: LLMFinishReason.CONTENT_FILTER,
-    [AnthropicStopReason.PAUSE_TURN]: LLMFinishReason.OTHER,
+    [AnthropicStopReason.PAUSE_TURN]: LLMFinishReason.PAUSED,
 };
 
 export function fromAnthropicResponse(response: AnthropicMessagesResponse): AnthropicChatResponse {
@@ -44,9 +44,16 @@ function toOutputPart(block: AnthropicContentBlock): ILLMOutputContentPart[] {
         case AnthropicContentBlockType.TOOL_USE:
             return [{ type: LLMContentPartType.TOOL_CALL, id: block.id, name: block.name, input: block.input }];
         case AnthropicContentBlockType.THINKING:
-            return [{ type: LLMContentPartType.REASONING, text: block.thinking }];
-        // No abstract counterpart; available via `raw`.
+            return [
+                {
+                    type: LLMContentPartType.REASONING,
+                    text: block.thinking,
+                    ...(block.signature !== undefined ? { signature: block.signature } : {}),
+                },
+            ];
         case AnthropicContentBlockType.REDACTED_THINKING:
+            return [{ type: LLMContentPartType.REASONING, text: '', redactedData: block.data }];
+        // No abstract counterpart; available via `raw`.
         case AnthropicContentBlockType.TOOL_RESULT:
         case AnthropicContentBlockType.IMAGE:
             return [];

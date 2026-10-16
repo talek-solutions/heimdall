@@ -47,6 +47,40 @@ describe('toAnthropicRequest', () => {
         });
     });
 
+    it('echoes reasoning back unchanged in an assistant turn, signatures and redacted data included', () => {
+        const result = toAnthropicRequest({
+            ...minimal,
+            messages: [
+                { role: LLMMessageRole.USER, content: 'hi' },
+                {
+                    role: LLMMessageRole.ASSISTANT,
+                    content: [
+                        { type: LLMContentPartType.REASONING, text: 'because', signature: 'sig' },
+                        { type: LLMContentPartType.REASONING, text: '', redactedData: 'opaque' },
+                        { type: LLMContentPartType.TOOL_CALL, id: 'c1', name: 'lookup', input: {} },
+                    ],
+                },
+            ],
+        });
+
+        assert.deepEqual(result.messages[1]?.content, [
+            { type: AnthropicContentBlockType.THINKING, thinking: 'because', signature: 'sig' },
+            { type: AnthropicContentBlockType.REDACTED_THINKING, data: 'opaque' },
+            { type: AnthropicContentBlockType.TOOL_USE, id: 'c1', name: 'lookup', input: {} },
+        ]);
+    });
+
+    it('rejects reasoning outside an assistant turn', () => {
+        assertUnsupported(
+            () =>
+                toAnthropicRequest({
+                    ...minimal,
+                    messages: [{ role: LLMMessageRole.USER, content: [{ type: LLMContentPartType.REASONING, text: 'x' }] }],
+                }),
+            'REASONING parts are only valid in ASSISTANT messages',
+        );
+    });
+
     it('rejects a model outside the AnthropicModel enum', () => {
         assertUnsupported(() => toAnthropicRequest({ ...minimal, model: 'gpt-5' }), "'gpt-5'");
     });

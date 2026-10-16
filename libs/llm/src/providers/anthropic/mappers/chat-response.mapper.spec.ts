@@ -18,7 +18,7 @@ const base: AnthropicMessagesResponse = {
 };
 
 describe('fromAnthropicResponse', () => {
-    it('maps output blocks, skipping ones with no abstract counterpart', () => {
+    it('maps output blocks, keeping what is needed to send reasoning back', () => {
         const result = fromAnthropicResponse({
             ...base,
             content: [
@@ -33,7 +33,8 @@ describe('fromAnthropicResponse', () => {
         assert.equal(result.model, 'claude-opus-5');
         assert.equal(result.role, LLMMessageRole.ASSISTANT);
         assert.deepEqual(result.content, [
-            { type: LLMContentPartType.REASONING, text: 'because' },
+            { type: LLMContentPartType.REASONING, text: 'because', signature: 's' },
+            { type: LLMContentPartType.REASONING, text: '', redactedData: 'opaque' },
             { type: LLMContentPartType.TEXT, text: 'answer' },
             { type: LLMContentPartType.TOOL_CALL, id: 'c1', name: 'lookup', input: { q: 1 } },
         ]);
@@ -46,7 +47,7 @@ describe('fromAnthropicResponse', () => {
             [AnthropicStopReason.MAX_TOKENS, LLMFinishReason.LENGTH],
             [AnthropicStopReason.TOOL_USE, LLMFinishReason.TOOL_CALLS],
             [AnthropicStopReason.REFUSAL, LLMFinishReason.CONTENT_FILTER],
-            [AnthropicStopReason.PAUSE_TURN, LLMFinishReason.OTHER],
+            [AnthropicStopReason.PAUSE_TURN, LLMFinishReason.PAUSED],
             [null, LLMFinishReason.OTHER],
         ];
 

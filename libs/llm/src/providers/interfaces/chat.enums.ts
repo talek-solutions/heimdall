@@ -57,6 +57,8 @@ export enum LLMFinishReason {
     TOOL_CALLS = 'tool_calls',
     /** Provider safety/content filter stopped generation. */
     CONTENT_FILTER = 'content_filter',
+    /** The provider paused a long turn; resend the conversation unchanged to resume it. */
+    PAUSED = 'paused',
     /** Provider-specific reason with no normalized counterpart; inspect `raw`. */
     OTHER = 'other',
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { AgentBudgetExceededError, AgentError, AgentErrorCode, BudgetDimension } from '@heimdall/agent';
 import { ExitCode } from '@heimdall/core';
 import { ManifestError, ManifestErrorCode } from '@heimdall/core/manifest';
 import { InvestigationError, InvestigationErrorCode } from '@heimdall/investigation';
@@ -53,6 +54,33 @@ describe('exitCodeForError', () => {
     ]) {
       assert.equal(exitCodeForError(new InvestigationError(code, 'x')), ExitCode.Usage, code);
     }
+  });
+
+  it('maps a spent agent budget to BudgetExceeded and bad agent config to Usage', () => {
+    const usage = {
+      turns: 16,
+      toolCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      toolCost: 0,
+      elapsedMs: 0,
+    };
+
+    assert.equal(
+      exitCodeForError(
+        new AgentBudgetExceededError(BudgetDimension.Turns, usage, { system: '', messages: [] }),
+      ),
+      ExitCode.BudgetExceeded,
+    );
+    assert.equal(
+      exitCodeForError(new AgentError(AgentErrorCode.InvalidConfig, 'x')),
+      ExitCode.Usage,
+    );
+    assert.equal(
+      exitCodeForError(new AgentError(AgentErrorCode.StopToolMissing, 'x')),
+      ExitCode.Unexpected,
+    );
   });
 
   it('maps a classification that stays invalid to Unexpected', () => {

@@ -6,10 +6,14 @@ import { CliModule } from './cli.module';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
 import { exitCodeForError, toErrorResponse } from './errors/error-exit.mapper';
 import { argvRequestsMachineOutput } from './errors/machine-output';
+import { shutdownTracing, startTracing } from './observability/tracing';
 import { writeData, writeDiagnostic } from './presentation/streams';
 import { version } from './version';
 
 async function bootstrap(): Promise<void> {
+  // Before the app is built, so every span created while it runs reaches the SDK (ADR 0017).
+  startTracing(process.env, version);
+
   // nest-commander overwrites the root command's exitOverride with this handler
   // during run(), so the root path must be handled here rather than in the
   // provider. The app is built first so the handler can close over the fully
@@ -33,10 +37,12 @@ async function bootstrap(): Promise<void> {
 
   await CommandFactory.runApplication(app);
   await app.close();
+  await shutdownTracing();
 }
 
 // A provider threw at bootstrap, so HeimdallCommand never ran; apply its output contract here.
-void bootstrap().catch((error: unknown) => {
+void bootstrap().catch(async (error: unknown) => {
+  await shutdownTracing();
   const response = toErrorResponse(error);
 
   if (argvRequestsMachineOutput(process.argv.slice(2))) {

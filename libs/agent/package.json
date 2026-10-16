@@ -1,0 +1,28 @@
+{
+  "name": "@heimdall/agent",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "swc src -d dist --config-file ../../.swcrc --strip-leading-paths"
+  },
+  "dependencies": {
+    "@heimdall/core": "^0.0.0",
+    "@heimdall/llm": "^0.0.0",
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/config": "^12.0.0",
+    "@opentelemetry/api": "1.9.1",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.3",
+    "@opentelemetry/sdk-metrics": "2.11.0",
+    "@opentelemetry/sdk-trace-base": "2.11.0"
+  }
+}

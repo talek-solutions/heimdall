@@ -45,3 +45,5 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0014](0014-fixture-datasources.md) | Fixture datasources behind the connectors' fetch | Accepted |
 | [0015](0015-system-manifest-as-a-traversable-graph.md) | System manifest as a traversable graph | Proposed |
 | [0016](0016-investigation-init-phase.md) | Investigation init phase: model-classified entry, deterministic scope and plan | Proposed |
+| [0017](0017-agent-runtime-loop-tools-budgets-tracing.md) | Agent runtime: loop, tools, budgets and tracing | Proposed |
+| [0018](0018-investigation-execution-on-the-agent-runtime.md) | Investigation execution on the agent runtime | Proposed |

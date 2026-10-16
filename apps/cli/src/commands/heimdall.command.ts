@@ -1,6 +1,7 @@
 import { CommandRunner } from 'nest-commander';
 import { OutputFormat } from '@heimdall/core';
 import { exitCodeForError, toErrorResponse } from '../errors/error-exit.mapper';
+import { shutdownTracing } from '../observability/tracing';
 import type { Streams } from '../presentation/streams';
 
 /**
@@ -27,7 +28,7 @@ export abstract class HeimdallCommand extends CommandRunner {
     try {
       await this.execute(passedParams, options ?? {});
     } catch (error) {
-      this.fail(error, options ?? {});
+      await this.fail(error, options ?? {});
     }
   }
 
@@ -36,7 +37,7 @@ export abstract class HeimdallCommand extends CommandRunner {
     options: Record<string, unknown>,
   ): Promise<void>;
 
-  private fail(error: unknown, options: Record<string, unknown>): never {
+  private async fail(error: unknown, options: Record<string, unknown>): Promise<never> {
     const response = toErrorResponse(error);
 
     if (this.wantsMachineOutput(options)) {
@@ -45,6 +46,8 @@ export abstract class HeimdallCommand extends CommandRunner {
       const detail = response.message === undefined ? '' : `: ${response.message}`;
       this.streams.writeDiagnostic(`heimdall: ${response.errorCode}${detail}\n`);
     }
+    // process.exit skips the normal shutdown, so spans of the failed run are flushed first.
+    await shutdownTracing();
     process.exit(exitCodeForError(error));
   }
 

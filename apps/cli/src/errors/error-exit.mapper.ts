@@ -1,3 +1,4 @@
+import { AgentErrorCode } from '@heimdall/agent';
 import { ExitCode, isHeimdallError, type ErrorResponse } from '@heimdall/core';
 import { ManifestErrorCode } from '@heimdall/core/manifest';
 import { InvestigationErrorCode } from '@heimdall/investigation';
@@ -21,6 +22,7 @@ const USAGE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   InvestigationErrorCode.EnvironmentUnknown,
   InvestigationErrorCode.EntryNotFound,
   InvestigationErrorCode.EntryAmbiguous,
+  AgentErrorCode.InvalidConfig,
   LlmErrorCode.INVALID_PROVIDER,
   TelemetryErrorCode.InvalidDatasourceConfig,
   TelemetryErrorCode.FixtureScenarioNotFound,
@@ -35,6 +37,9 @@ const PROVIDER_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   TelemetryErrorCode.AuthenticationFailed,
 ]);
 
+/** A run that used up its turns, tokens, tool calls or time: .docs/adr/0006 reserves exit code 5. */
+const BUDGET_ERROR_CODES: ReadonlySet<string> = new Set<string>([AgentErrorCode.BudgetExceeded]);
+
 export function exitCodeForError(error: unknown): ExitCode {
   if (!isHeimdallError(error)) {
     return ExitCode.Unexpected;
@@ -44,6 +49,9 @@ export function exitCodeForError(error: unknown): ExitCode {
   }
   if (PROVIDER_AUTH_ERROR_CODES.has(error.errorCode)) {
     return ExitCode.ProviderAuth;
+  }
+  if (BUDGET_ERROR_CODES.has(error.errorCode)) {
+    return ExitCode.BudgetExceeded;
   }
   return ExitCode.Unexpected;
 }
