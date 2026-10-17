@@ -12,7 +12,7 @@ export { DefaultsConfig } from './defaults.schema';
 export { HeimdallConfig } from './heimdall-config.schema';
 export { MetadataConfig } from './metadata.schema';
 export { QueryConfig } from './query.schema';
-export { AdditionalPatternConfig, RedactionConfig } from './redaction.schema';
+export { AdditionalPatternConfig, PATTERN_NAME, RedactionConfig } from './redaction.schema';
 export {
   DirectSourceConfig,
   GrafanaSourceConfig,

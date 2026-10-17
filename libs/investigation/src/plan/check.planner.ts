@@ -14,8 +14,14 @@ import {
 } from '@heimdall/core/graph';
 import { Criticality, IndicatorRole } from '@heimdall/core/manifest';
 import type { IInvestigationConfig } from '../config/investigation-config.model';
-import { BlindSpotReason, CheckKind, CheckTier, ScopeReason } from '../enums';
-import type { IBlindSpot, ICheck, ICheckCondition, IInvestigationScope } from '../interfaces';
+import { BlindSpotReason, CheckKind, CheckTier, HopSide, ScopeReason } from '../enums';
+import type {
+  IBlindSpot,
+  ICheck,
+  ICheckCondition,
+  ICheckHop,
+  IInvestigationScope,
+} from '../interfaces';
 import { INVESTIGATION_CONFIG } from '../investigation.tokens';
 import { CheckList } from './check.list';
 
@@ -227,6 +233,7 @@ export class CheckPlanner {
         kind: CheckKind.Logs,
         subject: caller.id,
         roles: [],
+        hop: { dependency: contender.id, side: HopSide.Caller },
         when,
         rationale: `Logs of ${contender.caller}: ${rationale}`,
       });
@@ -248,6 +255,11 @@ export class CheckPlanner {
     });
     const match = step?.match;
 
+    const hop = (component: IComponentVertex): ICheckHop => ({
+      dependency: dependency.id,
+      side: component.name === dependency.caller ? HopSide.Caller : HopSide.Target,
+    });
+
     for (const component of components.filter(({ telemetry }) => telemetry.logs !== undefined)) {
       list.add({
         tier: CheckTier.Corroborate,
@@ -256,10 +268,11 @@ export class CheckPlanner {
         roles: [],
         match,
         correlationKey: propagatesTraceContext ? undefined : correlationKey,
+        hop: hop(component),
         when,
         rationale: propagatesTraceContext
-          ? `Error logs of ${component.name} around the hop`
-          : `Error logs of ${component.name}, joined on ${correlationKey ?? 'a shared key'} because the flow drops trace context`,
+          ? `Logs of ${component.name} around the hop`
+          : `Logs of ${component.name}, joined on ${correlationKey ?? 'a shared key'} because the flow drops trace context`,
       });
     }
     if (!propagatesTraceContext) {
@@ -272,8 +285,9 @@ export class CheckPlanner {
         subject: component.id,
         roles: [],
         match,
+        hop: hop(component),
         when,
-        rationale: `Error spans of ${component.name} for the hop`,
+        rationale: `Spans of ${component.name} for the hop`,
       });
     }
   }
@@ -354,7 +368,7 @@ export class CheckPlanner {
         kind: CheckKind.Logs,
         subject: component.id,
         roles: [],
-        rationale: `Error logs of ${component.name}`,
+        rationale: `Logs of ${component.name}`,
       });
     }
     if (component.telemetry.traces !== undefined) {
@@ -363,7 +377,7 @@ export class CheckPlanner {
         kind: CheckKind.Traces,
         subject: component.id,
         roles: [],
-        rationale: `Error spans of ${component.name}`,
+        rationale: `Spans of ${component.name}`,
       });
     }
   }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigVersion } from '../../enums';
+import { ConfigVersion, Scrubber } from '../../enums';
 import type { IHeimdallConfig } from '../../interfaces/heimdall-config.interface';
 import { HeimdallConfig } from '../../schema';
 import { ConfigParser } from '../config.parser';
@@ -41,7 +41,25 @@ export class ConfigV1Parser extends ConfigParser {
         `currentContext: unknown context '${config.currentContext}'; declared contexts are ${this.list(contextNames)}`,
       );
     }
-    return issues;
+    return [...issues, ...this.validatePatternNames(config)];
+  }
+
+  /** A pattern's name is its replacement token, so it must not pass for another scrubber. */
+  private validatePatternNames(config: IHeimdallConfig): string[] {
+    const names = config.redaction.additionalPatterns.map((pattern) => pattern.name);
+    const builtIn = new Set<string>(Object.values(Scrubber));
+
+    return [
+      ...this.findDuplicates(names).map(
+        (name) => `redaction.additionalPatterns: duplicate pattern name '${name}'`,
+      ),
+      ...names
+        .filter((name) => builtIn.has(name))
+        .map(
+          (name) =>
+            `redaction.additionalPatterns: '${name}' is the name of a built-in scrubber; choose another`,
+        ),
+    ];
   }
 
   private findDuplicates(names: readonly string[]): readonly string[] {

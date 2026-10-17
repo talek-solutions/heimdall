@@ -3,9 +3,11 @@ import {
   CheckKind,
   CheckTier,
   type ICheck,
+  type ICheckResult,
   type IInvestigationEvent,
   type IInvestigationPlan,
   InvestigationEventType,
+  ResultKind,
 } from '@heimdall/investigation';
 
 const TIERS: readonly { readonly tier: CheckTier; readonly heading: string }[] = [
@@ -39,12 +41,8 @@ export function describeProgress(event: IInvestigationEvent): string | undefined
       return undefined;
     case InvestigationEventType.AgentTurn:
       return `turn ${event.turn}: ${event.toolCalls === 0 ? 'no tool calls' : `${event.toolCalls} tool call${event.toolCalls === 1 ? '' : 's'}`} (${event.inputTokens} in / ${event.outputTokens} out tokens)`;
-    case InvestigationEventType.CheckCompleted: {
-      const { result } = event;
-      const what = `${result.result} ${result.check ?? result.indicator} ${result.role}`;
-      const reading = result.problem?.errorCode ?? result.verdict ?? result.signal;
-      return `${what}: ${reading}${result.onset === null ? '' : `, onset ${result.onset}`}`;
-    }
+    case InvestigationEventType.CheckCompleted:
+      return describeResult(event.result);
   }
 }
 
@@ -114,4 +112,20 @@ function list(items: readonly string[]): string {
 
 function indentOrNone(items: readonly string[]): string[] {
   return (items.length === 0 ? [NONE] : items).map((item) => `  ${item}`);
+}
+
+function describeResult(result: ICheckResult): string {
+  switch (result.kind) {
+    case ResultKind.Indicator: {
+      const what = `${result.result} ${result.check ?? result.indicator} ${result.role}`;
+      const reading = result.problem?.errorCode ?? result.verdict ?? result.signal;
+      return `${what}: ${reading}${result.onset === null ? '' : `, onset ${result.onset}`}`;
+    }
+    case ResultKind.Logs:
+      return `${result.result} ${result.check ?? result.subject} logs: ${result.problem?.errorCode ?? `${result.templates.new.length} new, ${result.templates.surging.length} surging templates${result.streamNew ? ' (stream new in the window)' : ''}`}`;
+    case ResultKind.Traces:
+      return `${result.result} ${result.check ?? result.subject} traces: ${result.problem?.errorCode ?? `${result.operations.filter((operation) => operation.changes.length > 0).length} changed operations`}`;
+    case ResultKind.Trace:
+      return `${result.result} ${result.subject}: ${result.problem?.errorCode ?? `${result.trace?.spans.length ?? 0} spans`}`;
+  }
 }

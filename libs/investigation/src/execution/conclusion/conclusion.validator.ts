@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { VertexIds, VertexType, type IStepVertex } from '@heimdall/core/graph';
 import { InteractionMode } from '@heimdall/core/manifest';
+import { ResultKind } from '../checks/result-kind.enum';
 import type { ExecutionSession } from '../execution.session';
 import { ObjectiveVerdict, PreliminarySignal } from '../health/health.enums';
 import { ConclusionOutcome, ResultVerdict } from './conclusion.enums';
@@ -54,13 +55,19 @@ export class ConclusionValidator {
     ];
   }
 
-  /** Objective verdicts stand, and no data is never healthy or unhealthy. */
+  /**
+   * Objective verdicts stand, no data is never healthy or unhealthy, and evidence (logs, spans, a
+   * trace) is cited, not judged.
+   */
   private verdicts({ outcome, verdicts }: IConclusion, session: ExecutionSession): string[] {
     const problems = verdicts.flatMap(({ result: id, verdict }) => {
       const result = session.result(id);
 
       if (result === undefined) {
         return [];
+      }
+      if (result.kind !== ResultKind.Indicator) {
+        return [`${id} is ${result.kind} evidence: cite it in evidence, it takes no verdict`];
       }
       const required =
         result.verdict !== null
@@ -84,6 +91,7 @@ export class ConclusionValidator {
         .filter(({ verdict }) => verdict === ResultVerdict.Unhealthy)
         .map(({ result }) => result),
       ...session.all
+        .filter((result) => result.kind === ResultKind.Indicator)
         .filter(({ verdict }) => verdict === ObjectiveVerdict.Breached)
         .map(({ result }) => result),
     ];

@@ -49,8 +49,8 @@ failing hop instead of a wall of dashboards.
 ## Notes
 
 - The model never sees a raw series; it sees the statistics the code computed.
-- Logs and traces checks are refused with a clear error until
-  [0018-02](02-logs-and-traces-evidence.md) lands.
+- Logs and traces checks were refused until [0018-02](02-logs-and-traces-evidence.md) landed; they
+  now run as evidence.
 - The fixture evaluates a bare `sum` or `max` around a whole query, as Prometheus would (ADR 0014,
   amendment); the KPI and saturation templates depend on it.
 - An owner with no metrics matchers gets `INVESTIGATION_NO_METRICS_IDENTITY` rather than an

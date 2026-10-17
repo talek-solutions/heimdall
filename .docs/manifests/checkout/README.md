@@ -91,10 +91,21 @@ From `functionality:checkout`, with the default hop budget of 1:
    counts climbing. `checkout`'s pool is saturated: all 50 connections are in use and requests
    are queueing.
 4. **Corroborate.** `orders-reconcile` shares `orders-pg` and has no indicator, so the plan reads
-   its logs. They show the batch job's long transaction on `orders`, the cause.
+   its logs. The stream only exists in the window. Its `reconciling batch` lines show a
+   repeatable-read transaction on `orders`, open for 1s at the first line and for 2037s at the
+   last: the cause. Also new against the baseline:
+   - `orders-pg` logs sessions waiting for a ShareLock held by PID 47102.
+   - `checkout` logs `acquire connection timeout`.
+   - `checkout`'s `UPDATE orders` spans are slower (p50 65 ms against 8 ms).
+   
+   The rules and these numbers are in
+   [log-and-trace-evidence.md](../../design/log-and-trace-evidence.md#worked-example).
 
 ## Coverage findings
 
 - `payment-provider` is visible only through `payments`' client metrics.
 - `orders-reconcile` has no metrics, so contention on `orders-pg` can only be proven from logs.
+  The manifest maps its `table`, `isolation` and `tx_open_seconds` for that reason. Only mapped
+  fields reach the model (ADR 0008). `checkout` maps `error`, `operation`, `table`, `duration_ms`
+  and `pool`, and leaves `dsn`, `customer` and `authorization` unmapped on purpose.
 - `inventory`'s own PostgreSQL database, visible in the fixture traces, is not modelled.

@@ -49,16 +49,20 @@ describe('resolveInvestigationConfig', () => {
       [InvestigationEnvVariable.DeviationMinRun]: '3',
       [InvestigationEnvVariable.DeviationMinEffectPercent]: '25',
       [InvestigationEnvVariable.StepFloorSeconds]: '15',
+      [InvestigationEnvVariable.LogSampleLimit]: '100',
+      [InvestigationEnvVariable.TraceSampleLimit]: '5',
     });
 
     assert.equal(defaults.execution.model, DEFAULT_AGENT_MODEL);
     assert.deepEqual(defaults.execution.budget, {});
     assert.deepEqual(defaults.execution.deviation, { z: 3.5, minRun: 2, minEffect: 0.1 });
+    assert.deepEqual(defaults.execution.evidence, { logSampleLimit: 250, traceSampleLimit: 10 });
     assert.deepEqual(set.execution, {
       model: 'claude-opus-5',
       budget: { maxTurns: 8, maxToolCost: 40, timeoutMs: 90_000 },
       stepFloorSeconds: 15,
       deviation: { z: 3, minRun: 3, minEffect: 0.25 },
+      evidence: { logSampleLimit: 100, traceSampleLimit: 5 },
     });
   });
 

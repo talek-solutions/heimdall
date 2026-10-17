@@ -78,3 +78,18 @@ surface opt-in and greppable: every import of `@heimdall/telemetry/connectors` o
 to types), so the engine again has no way to obtain unredacted data. Until then, no code
 path that sends content to an LLM may consume a connector result directly.
 
+
+## Amendment (2026-10-17): closed by the redacting sources
+
+The amendment above is closed. `LogsSource` and `TracesSource` landed with `MetricsSource`
+([story 0018-02](../stories/0018-investigation-execution/02-logs-and-traces-evidence.md)):
+- **The `./connectors` subpath is removed.** It had no importer outside `libs/telemetry`, so it was
+  dropped rather than narrowed to types. `@heimdall/telemetry` exports only the redacting sources.
+- **The structural guarantee is back.** A source returns records whose values are a branded
+  `RedactedText`, which only the `Redactor` creates.
+- **A guard spec keeps it.** `libs/telemetry/src/egress.guard.spec.ts` fails if the package exports
+  anything but its root, or if code outside the library imports its connectors or fixtures.
+- **Where the rules live.** The two stages, every scrubber with its known misses, the pattern rules
+  for `additionalPatterns`, and the redaction counters are specified in
+  [`.docs/design/redaction-and-scrubbers.md`](../design/redaction-and-scrubbers.md).
+- **Who signs this off** is still open.

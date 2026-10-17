@@ -13,9 +13,12 @@ export enum InvestigationErrorCode {
   EntryAmbiguous = 'INVESTIGATION_ENTRY_AMBIGUOUS',
   /** The classification answer stayed invalid after a retry. */
   TriageFailed = 'INVESTIGATION_TRIAGE_FAILED',
-  /** The environment's context has no metrics source Heimdall can query. */
+  /**
+   * The environment's context has no source Heimdall can query: thrown for metrics, returned to the
+   * agent for a logs or traces check.
+   */
   SourceMissing = 'INVESTIGATION_SOURCE_MISSING',
-  /** The context's metrics source is of a kind execution cannot query yet, e.g. Grafana-proxied. */
+  /** The context's source is of a kind execution cannot query yet, e.g. Grafana-proxied. */
   SourceUnsupported = 'INVESTIGATION_SOURCE_UNSUPPORTED',
   /** The agent's conclusion stayed invalid after one correction. */
   ConclusionInvalid = 'INVESTIGATION_CONCLUSION_INVALID',
@@ -23,10 +26,14 @@ export enum InvestigationErrorCode {
   UnknownCheck = 'INVESTIGATION_UNKNOWN_CHECK',
   UnknownVertex = 'INVESTIGATION_UNKNOWN_VERTEX',
   OutOfReach = 'INVESTIGATION_OUT_OF_REACH',
-  /** Logs and traces checks arrive with story 0018-02. */
-  CheckUnavailable = 'INVESTIGATION_CHECK_UNAVAILABLE',
   NoQueryTemplate = 'INVESTIGATION_NO_QUERY_TEMPLATE',
   /** The metric's owner declares no metrics matchers, so its series cannot be told apart. */
   NoMetricsIdentity = 'INVESTIGATION_NO_METRICS_IDENTITY',
   QueryFailed = 'INVESTIGATION_QUERY_FAILED',
+  /** The component declares no `telemetry.logs`. */
+  NoLogsIdentity = 'INVESTIGATION_NO_LOGS_IDENTITY',
+  /** The component declares no `telemetry.traces`. */
+  NoTracesIdentity = 'INVESTIGATION_NO_TRACES_IDENTITY',
+  /** `get_trace` asked for a trace the backend does not have. */
+  TraceNotFound = 'INVESTIGATION_TRACE_NOT_FOUND',
 }

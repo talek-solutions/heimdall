@@ -170,6 +170,8 @@ query text and no matchers (ADR 0015, level 2):
 
 ```jsonc
 {
+  "result": "r3",
+  "kind": "indicator",                           // logs and traces: log-and-trace-evidence.md
   "check": "c3",
   "indicator": "indicator:step:place-order#1@1",
   "role": "errors",

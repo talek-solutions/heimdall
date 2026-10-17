@@ -51,7 +51,11 @@ reported as itself rather than as broken references everywhere else.
   `operation`, `table`, `topic`, `consumerGroup`, `instance`. A step's `match` keys use the same
   meanings.
 - Log `fields` map a field to any camelCase meaning, so correlation keys such as `orderId` are
-  allowed.
+  allowed. **They are the egress allowlist for logs (ADR 0008):** a field that is not mapped never
+  reaches the model. Investigation reads each line as a JSON object (nested keys dotted, e.g.
+  `http.status`), as logfmt, or as unstructured text, which counts as the `message`. Mapping a
+  field is a decision about what may leave; see
+  [redaction-and-scrubbers.md](../design/redaction-and-scrubbers.md).
 - A flow has at least one step; `propagatesTraceContext` defaults to `true`.
 - `provenance` (`declared` | `discovered`) defaults to `declared` on dependencies and metrics.
 

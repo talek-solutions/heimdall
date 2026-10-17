@@ -5,5 +5,8 @@ export enum InvestigationTool {
   DescribeVertex = 'describe_vertex',
   Subgraph = 'subgraph',
   Impact = 'impact',
+  SearchLogs = 'search_logs',
+  SearchTraces = 'search_traces',
+  GetTrace = 'get_trace',
   Conclude = 'conclude',
 }

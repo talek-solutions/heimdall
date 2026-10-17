@@ -18,7 +18,7 @@ Method
 2. Localise: run the step checks of each suspect flow. The fault starts at the deepest unhealthy step of a sync flow, and at the first unhealthy stage of an async flow.
 3. Explain and corroborate: run the checks whose condition names the origin step; checks gated on other steps are rarely needed.
 4. Impact: what else is hurt. It is reported, never a cause.
-Use ${InvestigationTool.RunChecks} for planned checks, ${InvestigationTool.CheckIndicator} for any other indicator in reach, and ${InvestigationTool.DescribeVertex}, ${InvestigationTool.Subgraph} and ${InvestigationTool.Impact} to read the system's structure.
+Use ${InvestigationTool.RunChecks} for planned checks, ${InvestigationTool.CheckIndicator} for any other indicator in reach, ${InvestigationTool.SearchLogs}, ${InvestigationTool.SearchTraces} and ${InvestigationTool.GetTrace} for logs and spans beyond the plan, and ${InvestigationTool.DescribeVertex}, ${InvestigationTool.Subgraph} and ${InvestigationTool.Impact} to read the system's structure.
 
 Reading results
 - Every result has an id (r1, r2, ...). Cite these ids when you conclude.
@@ -27,7 +27,10 @@ Reading results
 - no-data is never healthy. When a step without data sits deeper than the deepest unhealthy step of a sync flow, the origin is uncertain.
 - A result with zoom deviated briefly or borderline at its step. Re-run the check over that window before deciding.
 - direction says which way a throughput or KPI moved.
-- Logs and traces checks are not available yet; say so if the conclusion would need them.
+- Logs and traces results are evidence: cite them, never give them a verdict. They come from samples of the window and of the baseline before it, so counts are of the samples, not totals.
+- A logs result groups lines by template (variable parts as <*>). new templates are absent from the baseline (confirmedAbsent says a baseline query agreed), surging ones grew at least threefold; both carry the first and last example. A component whose stream is new only logs in the window, e.g. a job that started then. correlation lists key values to search the other side of a hop with.
+- A traces result lists the subject's operations that are new, slower (p50 or share of the trace) or failing more than in the baseline, with an exemplar trace. ${InvestigationTool.GetTrace} reads a trace id found in a log example.
+- Only fields the manifest maps reach you, and secrets are replaced by [REDACTED:<kind>]. redaction counts what was dropped or replaced; if evidence you need was dropped, say so rather than guess.
 
 Budget
 Every turn and every backend query counts. Batch checks into one ${InvestigationTool.RunChecks} call where you can.
@@ -67,7 +70,7 @@ function describeCheck(check: ICheck): string {
   const what =
     check.kind === CheckKind.Indicator && check.indicator !== undefined
       ? `${check.subject} · ${describeIndicator(check.indicator)}${check.roles.length > 0 ? ` · roles ${check.roles.join('/')}` : ''}`
-      : `${check.subject} · ${check.kind}${check.match === undefined ? '' : ` {${describeSelector(check.match)}}`} (not available yet)`;
+      : `${check.subject} · ${check.kind}${check.match === undefined ? '' : ` {${describeSelector(check.match)}}`}${check.hop === undefined ? '' : ` · ${check.hop.side} of ${check.hop.dependency}`}`;
   const when =
     check.when === undefined ? '' : ` · if it starts at ${check.when.failingSteps.join(' or ')}`;
 

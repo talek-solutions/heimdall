@@ -64,6 +64,15 @@ Selected by `--context` > `HEIMDALL_CONTEXT` > `currentContext`. None selected i
 - Every alias a context lists is declared, and listed at most once.
 - `currentContext`, when set, names a declared context.
 - Label keys follow Kubernetes syntax (`env`, `example.com/team`).
+- `redaction.additionalPatterns`:
+  - **Names** start with a lowercase letter and have at most 32 letters, digits or `-`. Each name
+    is unique and is not a built-in scrubber's name, because it becomes the `[REDACTED:<name>]`
+    token.
+  - **Patterns** must compile as a JavaScript regular expression, be at most 256 characters, and
+    not match an empty string. They may not use backreferences, or repeat a group that holds a
+    quantifier or an alternation (`(a+)+`, `(a|ab)*`). Those can make matching exponential. Exact
+    repetition such as `(?:-[a-z]{4}){3}` is fine. The rules and the reasoning are in
+    [redaction-and-scrubbers.md](../design/redaction-and-scrubbers.md#additional-patterns).
 
 ## Error codes
 

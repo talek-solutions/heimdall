@@ -16,30 +16,35 @@ went with them.
 
 | # | It can… | Status |
 |---|---|---|
-| 1 | Read logs and traces through the redacting `TelemetrySource`, returning only `TelemetryRecord`s | planned |
-| 2 | Drop every field the manifest's `telemetry.logs.fields` and the span attribute allowlist do not map | planned |
-| 3 | Scrub allowed fields with one scrubber per `Scrubber` value plus the config's `additionalPatterns`, replacing matches with `[REDACTED:<scrubber>]` | planned |
-| 4 | Validate `additionalPatterns` at load, including a guard against expensive patterns | planned |
-| 5 | Compile LogQL and TraceQL from telemetry identities; a step's `match` becomes line filters and semconv attributes | planned |
-| 6 | Run the planned logs and traces checks, and `search_logs` and `search_traces` within reach | planned |
-| 7 | Cap and deduplicate log samples by template; summarise traces as error spans | planned |
-| 8 | Count redaction: `heimdall.redaction.records`, `heimdall.redaction.fields_dropped`, `heimdall.redaction.matches`, a `telemetry.redact` span per batch, and a summary in the report | planned |
-| 9 | Narrow `@heimdall/telemetry/connectors` to types, closing ADR 0008's amendment | planned |
-| 10 | Document the stages, every scrubber and the counters in [`.docs/design/redaction-and-scrubbers.md`](../../design/redaction-and-scrubbers.md) | planned |
+| 1 | Read logs and traces through the redacting `LogsSource` and `TracesSource`, whose values are a branded `RedactedText` | done |
+| 2 | Drop every field the manifest's `telemetry.logs.fields` and the span attribute allowlist do not map; read an unstructured line as its message | done |
+| 3 | Scrub allowed fields with one scrubber per `Scrubber` value plus the config's `additionalPatterns`, replacing matches with `[REDACTED:<scrubber>]` | done |
+| 4 | Validate `additionalPatterns` at load, including a guard against expensive patterns | done |
+| 5 | Compile LogQL and TraceQL from telemetry identities. A step's `match` drops log lines that contradict it, and becomes semantic-convention attributes on the subject's end of the hop | done |
+| 6 | Run the planned logs and traces checks, and `search_logs`, `search_traces` and `get_trace` within reach | done |
+| 7 | Compare time-sliced samples with the baseline: log templates that are new or surging (with examples), span operations that are new, slower or failing more (with an exemplar trace) | done |
+| 8 | Count redaction: `heimdall.redaction.records`, `heimdall.redaction.fields_dropped`, `heimdall.redaction.matches`, a `telemetry.redact` span per batch, and a summary in the report | done |
+| 9 | Remove `@heimdall/telemetry/connectors`, closing ADR 0008's amendment | done |
+| 10 | Document the stages, every scrubber and the counters in [`.docs/design/redaction-and-scrubbers.md`](../../design/redaction-and-scrubbers.md), and the evidence rules in [`.docs/design/log-and-trace-evidence.md`](../../design/log-and-trace-evidence.md) | done |
 
 ## Acceptance
 
-- **Fixture walk.** `increased-latency-1` concludes `orders-reconcile` contention on `orders-pg`,
-  citing its logs (scripted-model e2e).
-- **Nothing leaks.** A planted JWT, bearer token, AWS key, connection string, private key, email
-  and an unmapped field never appear in any request sent to the model: redaction e2e.
+- **Fixture walk.** `increased-latency-1` concludes `orders-reconcile` contention on `orders-pg`
+  (origin step 3), citing its logs, within the default query budget (scripted-model e2e).
+- **Nothing leaks.** With the secret-bearing fields mapped, the planted JWT, bearer token, AWS key,
+  connection string and emails are scrubbed before any request to the model, and each scrubber's
+  token is what reaches it. With the reference manifest, the unmapped fields never reach the
+  model: redaction e2e. A private key is not planted in the fixtures; its scrubber is pinned by unit
+  specs.
 - **Per scrubber.** One planted-secret spec per scrubber covers a hit, a documented miss and a
   false-positive check. An expensive or invalid `additionalPatterns` entry fails at load.
 - **Counters.** With an in-memory exporter, the redaction counters and span counts equal the
-  planted data, and no matched value or dropped field name appears in any span, metric or report.
-- **Guard.** A spec fails if `libs/agent` or `libs/investigation` imports
-  `@heimdall/telemetry/connectors`.
-- **Redaction doc.** `redaction-and-scrubbers.md` is published, with the spec that pins each rule.
+  planted data. No matched value or dropped field name appears in any span or metric. Dropped
+  field names appear only in the local report (text and `--json`), never in a model request.
+- **Guard.** A spec fails if anything outside `libs/telemetry` imports its connectors or fixtures,
+  or if the package exports more than its root.
+- **Design docs.** `redaction-and-scrubbers.md` and `log-and-trace-evidence.md` are published, and
+  every rule in them names the spec that pins it.
 
 ## Notes
 

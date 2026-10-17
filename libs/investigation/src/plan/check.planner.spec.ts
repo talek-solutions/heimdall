@@ -4,7 +4,7 @@ import { before, describe, it } from 'node:test';
 import type { SystemGraph } from '@heimdall/core/graph';
 import { IndicatorRole } from '@heimdall/core/manifest';
 import { loadGraph, ReferenceManifest, testConfig } from '../__fixtures__/investigation.fixture';
-import { BlindSpotReason, CheckKind, CheckTier } from '../enums';
+import { BlindSpotReason, CheckKind, CheckTier, HopSide } from '../enums';
 import type { ICheck } from '../interfaces';
 import { ScopeResolver } from '../scope/scope.resolver';
 import { CheckPlanner, type IPlannedChecks } from './check.planner';
@@ -150,6 +150,27 @@ describe('CheckPlanner on checkout', () => {
         ['component:orders-reconcile', BlindSpotReason.NoIndicators],
       ],
     );
+  });
+
+  it('tells each logs and traces check around a hop which end of it the subject is', async () => {
+    const graph = await loadGraph(ReferenceManifest.Checkout);
+    const { checks } = plan(graph, 'functionality:checkout', [IndicatorRole.Latency]);
+    const aroundOrdersDb = checks
+      .filter((check) => check.when?.failingSteps.includes('step:place-order#3') === true)
+      .filter((check) => check.kind !== CheckKind.Indicator)
+      .map((check) => [check.kind, check.subject, check.hop?.side, check.hop?.dependency]);
+
+    assert.deepEqual(aroundOrdersDb, [
+      [
+        CheckKind.Logs,
+        'component:orders-reconcile',
+        HopSide.Caller,
+        'dependency:orders-reconcile/orders-db',
+      ],
+      [CheckKind.Logs, 'component:checkout', HopSide.Caller, 'dependency:checkout/orders-db'],
+      [CheckKind.Logs, 'component:orders-pg', HopSide.Target, 'dependency:checkout/orders-db'],
+      [CheckKind.Traces, 'component:checkout', HopSide.Caller, 'dependency:checkout/orders-db'],
+    ]);
   });
 });
 

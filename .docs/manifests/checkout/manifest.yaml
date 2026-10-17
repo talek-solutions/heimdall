@@ -33,7 +33,11 @@ spec:
   exposes:
     - { transport: http, route: /api/checkout }
   telemetry:
-    logs: { selector: '{service_name="checkout"}', fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId } }
+    # Mapped fields are the only ones that reach the model (ADR 0008): dsn, customer and
+    # authorization stay unmapped on purpose.
+    logs:
+      selector: '{service_name="checkout"}'
+      fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId, error: error, operation: operation, table: table, duration_ms: durationMs, pool: pool }
     metrics: { matchers: { service: checkout } }
     traces: { serviceName: checkout }
   metrics:
@@ -147,7 +151,7 @@ spec:
   type: worker
   description: Periodic batch job reconciling orders against payments
   telemetry:
-    logs: { selector: '{service_name="orders-reconcile"}', fields: { level: severity, msg: message } }
+    logs: { selector: '{service_name="orders-reconcile"}', fields: { level: severity, msg: message, table: table, isolation: isolation, tx_open_seconds: txOpenSeconds } }
   dependsOn:
     - name: orders-db
       target: orders-pg

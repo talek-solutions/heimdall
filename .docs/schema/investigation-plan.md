@@ -79,8 +79,9 @@ the plan. Times are ISO-8601 strings.
       "id": "c23", "tier": "corroborate", "kind": "logs", "subject": "component:checkout",
       "roles": [], "match": { "operation": "UPDATE", "table": "orders" },
       // "correlationKey": "orderId" appears when the flow drops trace context
+      "hop": { "dependency": "dependency:checkout/orders-db", "side": "caller" },  // caller | target
       "when": { "failingSteps": ["step:place-order#3"] },
-      "rationale": "Error logs of checkout around the hop"
+      "rationale": "Logs of checkout around the hop"
     }
   ],
   "blindSpots": [{ "vertex": "component:payment-provider", "reason": "no-telemetry" }],
@@ -113,19 +114,23 @@ the plan. Times are ISO-8601 strings.
 | `investigation.scope_resolved` | `scope` |
 | `investigation.plan_ready` | `plan` |
 | `investigation.agent_turn` | `turn`, `finishReason`, `toolCalls`, `inputTokens`, `outputTokens` (execution) |
-| `investigation.check_completed` | `result`, one per role of a check (execution) |
+| `investigation.check_completed` | `result`: one per role of an indicator check, one per logs or traces check or `get_trace` (execution) |
 | `investigation.concluded` | `report` (execution, last) |
 
 ## Execution
 
-Without `--plan-only`, an agent runs the plan's checks against the environment's metrics and ends
-with a conclusion that code has checked
-([ADR 0018](../adr/0018-investigation-execution-on-the-agent-runtime.md)). The health rules behind
-every result are in [health-evaluation.md](../design/health-evaluation.md).
+Without `--plan-only`, an agent runs the plan's checks against the environment's telemetry and
+ends with a conclusion that code has checked
+([ADR 0018](../adr/0018-investigation-execution-on-the-agent-runtime.md)). The rules behind every
+result are in three design notes:
+- metrics: [health-evaluation.md](../design/health-evaluation.md)
+- logs and traces: [log-and-trace-evidence.md](../design/log-and-trace-evidence.md)
+- what may leave for the model: [redaction-and-scrubbers.md](../design/redaction-and-scrubbers.md)
 
-**Where the metrics come from.** In fixture mode, the fixture. Otherwise, the Prometheus source of
-the environment's `context` in `~/.heimdall/config.yaml`. Logs and traces checks are listed in the
-plan, but are not run yet: they return `INVESTIGATION_CHECK_UNAVAILABLE`.
+**Where the telemetry comes from.** In fixture mode, the fixture of each backend. Otherwise, the
+Prometheus, Loki and Tempo sources of the environment's `context` in `~/.heimdall/config.yaml`.
+Prometheus is required. A missing Loki or Tempo source only fails the checks that need it, with
+`INVESTIGATION_SOURCE_MISSING` in their result.
 
 **Tools the agent has**, all read-only:
 
@@ -133,6 +138,9 @@ plan, but are not run yet: they return `INVESTIGATION_CHECK_UNAVAILABLE`.
 |---|---|
 | `run_checks` | Runs planned checks by id, optionally over a narrower window inside the plan's |
 | `check_indicator` | Runs any indicator whose subject is in scope; a pruned subject needs a reason, kept in the report |
+| `search_logs` | A component's log templates within reach, optionally only lines that contain a literal text |
+| `search_traces` | A component's span operations within reach, optionally one span name, or errors only |
+| `get_trace` | One trace by id, e.g. a `traceId` from a log example |
 | `describe_vertex`, `subgraph`, `impact` | Reads the graph; no telemetry |
 | `conclude` | Ends the run; a rejected conclusion comes back once, a second rejection fails the run |
 
@@ -142,12 +150,14 @@ plan, but are not run yet: they return `INVESTIGATION_CHECK_UNAVAILABLE`.
 |---|---|---|
 | `INVESTIGATION_AGENT_MODEL` | `claude-opus-5-5` | Model for the execution agent |
 | `INVESTIGATION_MAX_TURNS` | `AGENT_MAX_TURNS` (16) | Model calls per run |
-| `INVESTIGATION_MAX_QUERIES` | `AGENT_MAX_TOOL_COST` (120) | Backend queries per run; each role of a check costs two |
+| `INVESTIGATION_MAX_QUERIES` | `AGENT_MAX_TOOL_COST` (120) | Backend queries per run: two per role of an indicator check, up to 11 per logs check, 7 per traces check |
 | `INVESTIGATION_TIMEOUT_SECONDS` | `AGENT_TIMEOUT_SECONDS` (300) | Wall-clock time per run |
 | `INVESTIGATION_DEVIATION_Z` | `3.5` | Robust z-score a point must reach to deviate |
 | `INVESTIGATION_DEVIATION_MIN_RUN` | `2` | Consecutive points that make a deviation, or a breach |
 | `INVESTIGATION_DEVIATION_MIN_EFFECT_PERCENT` | `10` | Change against the baseline median a point must also reach |
 | `INVESTIGATION_STEP_FLOOR_SECONDS` | `1` | Smallest query step |
+| `INVESTIGATION_LOG_SAMPLE_LIMIT` | `250` | Log lines per time slice, for the window and for the baseline |
+| `INVESTIGATION_TRACE_SAMPLE_LIMIT` | `10` | Traces per time slice, and per error search |
 
 The remaining `AGENT_*` limits (tool calls, tokens, concurrency) are in
 [ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md).
@@ -156,7 +166,13 @@ The remaining `AGENT_*` limits (tool calls, tokens, concurrency) are in
 - the plan
 - the outcome (`cause-found`, `no-signal`, `inconclusive`)
 - the conclusion: summary, cause, origin, verdicts, evidence, confidence, mitigations
-- every result (shape in [health-evaluation.md](../design/health-evaluation.md#what-the-agent-receives))
+- every result. Each one has a `kind`:
+  - `indicator`: shape in [health-evaluation.md](../design/health-evaluation.md#what-the-agent-receives)
+  - `logs`, `traces` or `trace`: shape in [log-and-trace-evidence.md](../design/log-and-trace-evidence.md#what-the-agent-receives)
+- `redaction`:
+  - `totals`: the counts the agent saw
+  - `droppedFields`: the names of the fields the allowlist dropped, per subject. **They are in
+    this local report only**, never sent to the model or exported as telemetry (ADR 0008).
 - the pruned vertices looked at, with their reasons
 - usage: turns, tool calls, queries, tokens, time
 - the trace id, when tracing is on
@@ -193,10 +209,20 @@ picks one; the entry's method is then `prompt`. Without one, the command exits 2
 | `LLM_MISSING_API_KEY`, `LLM_AUTHENTICATION_FAILED` | the triage or execution model cannot be reached | 4 |
 | `INVESTIGATION_SOURCE_MISSING` | execution needs a Prometheus source and the environment's context has none | 2 |
 | `INVESTIGATION_SOURCE_UNSUPPORTED` | the context reaches metrics only through Grafana, which execution cannot query yet | 2 |
+| `CONFIG_INVALID` | an `additionalPatterns` entry is invalid or unsafe ([heimdall-config.md](heimdall-config.md#validation-rules)) | 2 |
 | `INVESTIGATION_CONCLUSION_INVALID` | the agent's conclusion was rejected twice | 1 |
 | `AGENT_BUDGET_EXCEEDED` | the run spent a budget before concluding ([ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md)) | 5 |
 | `AGENT_INVALID_CONFIG` | an `AGENT_*` variable cannot be used. Checked at startup | 2 |
 
-These are returned to the agent as tool results, not raised: `INVESTIGATION_UNKNOWN_CHECK`,
-`INVESTIGATION_UNKNOWN_VERTEX`, `INVESTIGATION_OUT_OF_REACH`, `INVESTIGATION_CHECK_UNAVAILABLE`,
-`INVESTIGATION_NO_QUERY_TEMPLATE`, `INVESTIGATION_NO_METRICS_IDENTITY`, `INVESTIGATION_QUERY_FAILED`.
+These are returned to the agent as tool results, not raised:
+- `INVESTIGATION_UNKNOWN_CHECK`
+- `INVESTIGATION_UNKNOWN_VERTEX`
+- `INVESTIGATION_OUT_OF_REACH`
+- `INVESTIGATION_NO_QUERY_TEMPLATE`
+- `INVESTIGATION_NO_METRICS_IDENTITY`
+- `INVESTIGATION_NO_LOGS_IDENTITY`
+- `INVESTIGATION_NO_TRACES_IDENTITY`
+- `INVESTIGATION_TRACE_NOT_FOUND`
+- `INVESTIGATION_QUERY_FAILED`
+- `INVESTIGATION_SOURCE_MISSING` and `INVESTIGATION_SOURCE_UNSUPPORTED`, for a logs or traces
+  source

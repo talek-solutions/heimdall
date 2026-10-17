@@ -1,10 +1,13 @@
 import { ToolAccess, toolOk, type IAgentTool } from '@heimdall/agent';
 import { CheckKind } from '../../enums';
 import { InvestigationErrorCode } from '../../errors';
-import type { ITimeWindow } from '../../interfaces';
-import type { ICheckProblem, IRoleResult } from '../checks/check-result.interface';
+import type { ICheck, ITimeWindow } from '../../interfaces';
+import type { ICheckProblem, ICheckResult } from '../checks/check-result.interface';
 import type { CheckRunner } from '../checks/check.runner';
+import { ResultKind } from '../checks/result-kind.enum';
+import type { EvidenceRunner } from '../evidence/evidence.runner';
 import type { ExecutionSession } from '../execution.session';
+import { logsTarget, tracesTarget } from './evidence-targets';
 import { InvestigationTool } from './investigation-tool.enum';
 import { checkWindow, invalid, nonEmptyString, object, WINDOW_SCHEMA } from './tool-input';
 
@@ -15,14 +18,20 @@ export interface IRunChecksInput {
   readonly window: ITimeWindow | undefined;
 }
 
+interface IRun {
+  readonly results: readonly ICheckResult[];
+  readonly queries: number;
+}
+
 export function runChecksTool(
   session: ExecutionSession,
   runner: CheckRunner,
+  evidence: EvidenceRunner,
 ): IAgentTool<IRunChecksInput> {
   return {
     name: InvestigationTool.RunChecks,
     description:
-      "Run planned checks by id (c1, c2, …) and get, per role, deviation statistics against the baseline and, for SLO, threshold and nonZero expectations, code's verdict. Pass a narrower window to zoom in on a short or borderline deviation.",
+      "Run planned checks by id (c1, c2, …). An indicator check returns, per role, deviation statistics against the baseline and, for SLO, threshold and nonZero expectations, code's verdict. A logs check returns log templates that are new or surging against the baseline, with redacted examples; a traces check returns the subject's span operations that got slower, are new or fail, with an exemplar trace. Pass a narrower window to zoom in, e.g. from an onset.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -55,7 +64,7 @@ export function runChecksTool(
         : { ok: true, input: { checks: [...new Set(checks)], window } };
     },
     execute: async ({ checks, window }, { signal }) => {
-      const results: IRoleResult[] = [];
+      const results: ICheckResult[] = [];
       const problems: Array<ICheckProblem & { readonly check: string }> = [];
       let queries = 0;
 
@@ -70,21 +79,23 @@ export function runChecksTool(
           });
           continue;
         }
-        if (check.kind !== CheckKind.Indicator || check.indicator === undefined) {
-          problems.push({
-            check: id,
-            errorCode: InvestigationErrorCode.CheckUnavailable,
-            message: `${check.kind} checks are not available yet; they arrive with logs and traces evidence`,
-          });
-          continue;
-        }
-        const run = await runner.run(
+        const run = await runCheck(
           session,
-          { check: id, indicator: check.indicator, roles: check.roles },
+          runner,
+          evidence,
+          check,
           window ?? session.plan.window,
           signal,
         );
 
+        if (run === undefined) {
+          problems.push({
+            check: id,
+            errorCode: InvestigationErrorCode.UnknownVertex,
+            message: `${check.subject} cannot be read as a ${check.kind} check`,
+          });
+          continue;
+        }
         results.push(...run.results);
         queries += run.queries;
       }
@@ -93,10 +104,55 @@ export function runChecksTool(
   };
 }
 
-export function summarise(results: readonly IRoleResult[], problems: number): string {
-  const parts = results.map(
-    (result) =>
-      `${result.check ?? result.indicator} ${result.role} ${result.verdict ?? result.signal}`,
-  );
+export function summarise(results: readonly ICheckResult[], problems: number): string {
+  const parts = results.map((result) => {
+    switch (result.kind) {
+      case ResultKind.Indicator:
+        return `${result.check ?? result.indicator} ${result.role} ${result.verdict ?? result.signal}`;
+      case ResultKind.Logs:
+        return `${result.check ?? result.subject} logs ${result.problem?.errorCode ?? `${result.templates.new.length} new, ${result.templates.surging.length} surging`}`;
+      case ResultKind.Traces:
+        return `${result.check ?? result.subject} traces ${result.problem?.errorCode ?? `${result.operations.filter((operation) => operation.changes.length > 0).length} changed operations`}`;
+      case ResultKind.Trace:
+        return `${result.subject} ${result.problem?.errorCode ?? `${result.trace?.spans.length ?? 0} spans`}`;
+    }
+  });
   return [...parts, ...(problems === 0 ? [] : [`${problems} not run`])].join('; ');
+}
+
+async function runCheck(
+  session: ExecutionSession,
+  runner: CheckRunner,
+  evidence: EvidenceRunner,
+  check: ICheck,
+  window: ITimeWindow,
+  signal: AbortSignal,
+): Promise<IRun | undefined> {
+  switch (check.kind) {
+    case CheckKind.Indicator:
+      return check.indicator === undefined
+        ? undefined
+        : runner.run(
+            session,
+            { check: check.id, indicator: check.indicator, roles: check.roles },
+            window,
+            signal,
+          );
+    case CheckKind.Logs: {
+      const target = logsTarget(session, check);
+      return target === undefined
+        ? undefined
+        : single(await evidence.logs(session, target, window, signal));
+    }
+    case CheckKind.Traces: {
+      const target = tracesTarget(session, check);
+      return target === undefined
+        ? undefined
+        : single(await evidence.traces(session, target, window, signal));
+    }
+  }
+}
+
+function single(run: { readonly result: ICheckResult; readonly queries: number }): IRun {
+  return { results: [run.result], queries: run.queries };
 }

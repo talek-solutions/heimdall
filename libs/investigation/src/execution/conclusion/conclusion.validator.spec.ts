@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
-import { AuthScheme } from '@heimdall/config';
 import { ExpectationKind, IndicatorRole } from '@heimdall/core/manifest';
-import { checkoutPlan } from '../../__fixtures__/execution.fixture';
+import { checkoutPlan, PLACEHOLDER_SOURCES } from '../../__fixtures__/execution.fixture';
 import type { IRoleResult } from '../checks/check-result.interface';
+import { ResultKind } from '../checks/result-kind.enum';
+import type { ILogsResult } from '../evidence/evidence-result.interface';
 import { ExecutionSession } from '../execution.session';
 import { ObjectiveVerdict, PreliminarySignal } from '../health/health.enums';
 import { ConclusionOutcome, MitigationTier, ResultVerdict } from './conclusion.enums';
@@ -21,6 +22,7 @@ function result(
 ): IRoleResult {
   return {
     result: id,
+    kind: ResultKind.Indicator,
     check: null,
     indicator: `indicator:${subject}@1`,
     subject,
@@ -43,6 +45,22 @@ function result(
   };
 }
 
+const LOGS: ILogsResult = {
+  result: 'r6',
+  kind: ResultKind.Logs,
+  check: null,
+  subject: 'component:orders-pg',
+  window: { start: '', end: '' },
+  baseline: { start: '', end: '' },
+  filter: { contains: null, narrowedBy: {}, ignored: [] },
+  sampled: { window: 0, baseline: 0, slices: 4, capped: false },
+  streamNew: false,
+  templates: { new: [], surging: [], steady: [], vanished: [] },
+  correlation: null,
+  redaction: { records: 0, fieldsDropped: 0, truncated: 0, matches: {} },
+  problem: null,
+};
+
 const MITIGATIONS = [{ tier: MitigationTier.Immediate, action: 'Fail over', tradeoff: 'Fees' }];
 
 describe('ConclusionValidator', () => {
@@ -51,12 +69,7 @@ describe('ConclusionValidator', () => {
   before(async () => {
     const { plan, graph } = await checkoutPlan();
 
-    session = new ExecutionSession(
-      graph,
-      plan,
-      { url: 'x', timeoutMs: 1, auth: { scheme: AuthScheme.None } },
-      {},
-    );
+    session = new ExecutionSession(graph, plan, PLACEHOLDER_SOURCES, {});
     session.record(result('r1', 'step:place-order#1', PreliminarySignal.Anomalous));
     session.record(result('r2', 'step:place-order#4', PreliminarySignal.Anomalous));
     session.record(result('r3', 'step:place-order#5', PreliminarySignal.Anomalous));
@@ -64,6 +77,7 @@ describe('ConclusionValidator', () => {
     session.record(
       result('r5', 'flow:place-order', PreliminarySignal.Anomalous, ObjectiveVerdict.Met),
     );
+    session.record(LOGS);
   });
 
   const sound: IConclusion = {
@@ -153,5 +167,22 @@ describe('ConclusionValidator', () => {
     );
 
     assert.match(problem ?? '', /no-signal contradicts unhealthy results r1, r2, r3/);
+  });
+
+  it('takes logs and traces as evidence, never as a verdict', () => {
+    assert.deepEqual(validator.validate({ ...sound, evidence: ['r3', 'r6'] }, session), []);
+    assert.deepEqual(
+      validator.validate(
+        {
+          ...sound,
+          verdicts: [
+            ...sound.verdicts,
+            { result: 'r6', verdict: ResultVerdict.Unhealthy, reason: 'locks' },
+          ],
+        },
+        session,
+      ),
+      ['r6 is logs evidence: cite it in evidence, it takes no verdict'],
+    );
   });
 });

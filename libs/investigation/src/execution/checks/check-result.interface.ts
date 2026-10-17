@@ -1,10 +1,16 @@
 import type { ExpectationKind, IndicatorRole } from '@heimdall/core/manifest';
 import type { InvestigationErrorCode } from '../../errors';
 import type {
+  ILogsResult,
+  ITraceResult,
+  ITracesResult,
+} from '../evidence/evidence-result.interface';
+import type {
   DeviationDirection,
   ObjectiveVerdict,
   PreliminarySignal,
 } from '../health/health.enums';
+import type { ResultKind } from './result-kind.enum';
 
 export interface ICheckProblem {
   readonly errorCode: InvestigationErrorCode;
@@ -18,6 +24,7 @@ export interface ICheckProblem {
 export interface IRoleResult {
   /** `r1`, `r2`, …: what a conclusion cites. */
   readonly result: string;
+  readonly kind: ResultKind.Indicator;
   /** The planned check, when the result answers one. */
   readonly check: string | null;
   readonly indicator: string;
@@ -48,3 +55,7 @@ export interface IRoleResult {
   /** Why no statistics could be computed. */
   readonly problem: ICheckProblem | null;
 }
+
+/** Every result a tool can return; evidence (logs, traces, a trace) carries no verdict. */
+export type ICheckResult = IRoleResult | ILogsResult | ITracesResult | ITraceResult;
+export type IEvidenceResult = ILogsResult | ITracesResult | ITraceResult;

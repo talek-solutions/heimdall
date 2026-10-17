@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { AuthScheme, SignalType, TelemetryBackend, type IHeimdallConfig } from '@heimdall/config';
 import { DatasourceType, type ITelemetryDatasourceConfig } from '@heimdall/telemetry';
 import { InvestigationError, InvestigationErrorCode } from '../../errors';
-import { MetricsSourceResolver } from './metrics-source.resolver';
+import { TelemetrySourcesResolver } from './telemetry-sources.resolver';
 
 const PROMETHEUS = {
   alias: 'prod-prom',
@@ -12,6 +12,12 @@ const PROMETHEUS = {
   auth: { scheme: AuthScheme.None },
   timeoutMs: 10_000,
   metadata: { labels: {}, annotations: {} },
+} as const;
+const LOKI = {
+  ...PROMETHEUS,
+  alias: 'prod-loki',
+  type: TelemetryBackend.Loki,
+  url: 'https://loki.example',
 } as const;
 const GRAFANA = {
   ...PROMETHEUS,
@@ -53,42 +59,57 @@ function rejectsWith(code: InvestigationErrorCode, fn: () => unknown): void {
   );
 }
 
-describe('MetricsSourceResolver', () => {
+describe('TelemetrySourcesResolver', () => {
   it("uses the environment's context's prometheus source", () => {
-    const resolver = new MetricsSourceResolver(
+    const resolver = new TelemetrySourcesResolver(
       datasources(DatasourceType.Http),
       config([GRAFANA, PROMETHEUS], { prod: ['prod-grafana', 'prod-prom'] }),
     );
 
-    assert.equal(resolver.resolve(prod).url, 'https://prometheus.example');
+    assert.equal(resolver.resolve(prod).metrics.url, 'https://prometheus.example');
   });
 
   it('needs no config in fixture mode', () => {
-    const resolver = new MetricsSourceResolver(datasources(DatasourceType.Fixture));
+    const resolver = new TelemetrySourcesResolver(datasources(DatasourceType.Fixture));
 
-    assert.match(resolver.resolve(prod).url, /fixture\.invalid/);
+    assert.match(resolver.resolve(prod).metrics.url, /fixture\.invalid/);
   });
 
   it('says so when a live source is needed and no user config is loaded', () => {
     rejectsWith(InvestigationErrorCode.SourceMissing, () =>
-      new MetricsSourceResolver(datasources(DatasourceType.Http)).resolve(prod),
+      new TelemetrySourcesResolver(datasources(DatasourceType.Http)).resolve(prod),
     );
   });
 
   it('names a missing context, a missing source and a Grafana-only source', () => {
     rejectsWith(InvestigationErrorCode.SourceMissing, () =>
-      new MetricsSourceResolver(datasources(DatasourceType.Http), config([], {})).resolve(prod),
+      new TelemetrySourcesResolver(datasources(DatasourceType.Http), config([], {})).resolve(prod),
     );
     rejectsWith(InvestigationErrorCode.SourceMissing, () =>
-      new MetricsSourceResolver(datasources(DatasourceType.Http), config([], { prod: [] })).resolve(
-        prod,
-      ),
+      new TelemetrySourcesResolver(
+        datasources(DatasourceType.Http),
+        config([], { prod: [] }),
+      ).resolve(prod),
     );
     rejectsWith(InvestigationErrorCode.SourceUnsupported, () =>
-      new MetricsSourceResolver(
+      new TelemetrySourcesResolver(
         datasources(DatasourceType.Http),
         config([GRAFANA], { prod: ['prod-grafana'] }),
       ).resolve(prod),
+    );
+  });
+
+  it('resolves logs and traces too, and makes a missing one a problem rather than an error', () => {
+    const sources = new TelemetrySourcesResolver(
+      datasources(DatasourceType.Http),
+      config([PROMETHEUS, LOKI], { prod: ['prod-prom', 'prod-loki'] }),
+    ).resolve(prod);
+
+    assert.deepEqual(sources.logs.ok && sources.logs.source.url, 'https://loki.example');
+    assert.equal(sources.traces.ok, false);
+    assert.equal(
+      !sources.traces.ok && sources.traces.problem.errorCode,
+      InvestigationErrorCode.SourceMissing,
     );
   });
 });

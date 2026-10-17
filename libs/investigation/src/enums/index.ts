@@ -2,6 +2,7 @@ export { BlindSpotReason } from './blind-spot-reason.enum';
 export { CheckKind } from './check-kind.enum';
 export { CheckTier } from './check-tier.enum';
 export { EntryMethod } from './entry-method.enum';
+export { HopSide } from './hop-side.enum';
 export { InvestigationEnvVariable } from './investigation-env-variable.enum';
 export { InvestigationEventType } from './investigation-event-type.enum';
 export { PruneReason } from './prune-reason.enum';

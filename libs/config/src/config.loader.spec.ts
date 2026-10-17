@@ -107,6 +107,38 @@ describe('ConfigLoader.parse (v1)', () => {
     }
   });
 
+  it('accepts a safe additional pattern and refuses an expensive one at load, naming the rule', async () => {
+    const withPattern = (name: string, pattern: string) =>
+      `${VALID}redaction:\n  additionalPatterns:\n    - name: ${name}\n      pattern: '${pattern}'\n`;
+    const config = await parseConfig(withPattern('internal-api-key', 'ik_[a-zA-Z0-9]{32}'));
+
+    assert.equal(config.redaction.additionalPatterns[0]?.name, 'internal-api-key');
+    await assert.rejects(
+      parseConfig(withPattern('greedy', '(a+)+b')),
+      (error: unknown) =>
+        error instanceof ConfigError &&
+        error.errorCode === ConfigErrorCode.ConfigInvalid &&
+        /pattern repeats a group/.test(error.message),
+    );
+    await expectCode(withPattern('broken', '(unclosed'), ConfigErrorCode.ConfigInvalid);
+    await expectCode(withPattern('Upper', 'x+'), ConfigErrorCode.ConfigInvalid);
+  });
+
+  it('refuses additional pattern names that repeat or pass for a built-in scrubber', async () => {
+    const patterns = (names: readonly string[]) =>
+      `${VALID}redaction:\n  additionalPatterns:\n${names.map((name) => `    - name: ${name}\n      pattern: 'k_[0-9]{8}'\n`).join('')}`;
+
+    await assert.rejects(
+      parseConfig(patterns(['key', 'key'])),
+      (error: unknown) =>
+        error instanceof ConfigError && /duplicate pattern name/.test(error.message),
+    );
+    await assert.rejects(
+      parseConfig(patterns(['jwt'])),
+      (error: unknown) => error instanceof ConfigError && /built-in scrubber/.test(error.message),
+    );
+  });
+
   it('reports malformed YAML distinctly from invalid content', async () => {
     await expectCode('sources: [unclosed\n', ConfigErrorCode.ConfigParseFailed);
   });

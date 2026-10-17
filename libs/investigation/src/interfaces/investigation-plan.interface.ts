@@ -5,6 +5,7 @@ import type {
   CheckKind,
   CheckTier,
   EntryMethod,
+  HopSide,
   PruneReason,
   ScopeReason,
   SymptomMethod,
@@ -76,6 +77,12 @@ export interface ICheckCondition {
   readonly failingSteps: readonly string[];
 }
 
+export interface ICheckHop {
+  /** The dependency vertex the check reads around. */
+  readonly dependency: string;
+  readonly side: HopSide;
+}
+
 export interface ICheck {
   /** `c1`, `c2`, … in the order checks run. */
   readonly id: string;
@@ -90,6 +97,8 @@ export interface ICheck {
   readonly match?: ISemanticSelector | undefined;
   /** Joins logs across a hop that drops trace context. */
   readonly correlationKey?: string | undefined;
+  /** For logs and traces checks around a hop: which end of it the subject is. */
+  readonly hop?: ICheckHop | undefined;
   readonly when?: ICheckCondition | undefined;
   readonly rationale: string;
 }

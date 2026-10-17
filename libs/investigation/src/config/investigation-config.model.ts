@@ -17,12 +17,21 @@ export interface IDeviationConfig {
   readonly minEffect: number;
 }
 
+/** `.docs/design/log-and-trace-evidence.md`, Sampling. */
+export interface IEvidenceConfig {
+  /** Log lines read per time slice, for the window and for the baseline. */
+  readonly logSampleLimit: number;
+  /** Traces read per time slice, for the window and for the baseline. */
+  readonly traceSampleLimit: number;
+}
+
 export interface IExecutionConfig {
   readonly model: string;
   /** Only the limits whose INVESTIGATION_* variable is set; the rest stay the AGENT_* defaults. */
   readonly budget: Partial<IAgentBudget>;
   readonly stepFloorSeconds: number;
   readonly deviation: IDeviationConfig;
+  readonly evidence: IEvidenceConfig;
 }
 
 export interface IInvestigationConfig {

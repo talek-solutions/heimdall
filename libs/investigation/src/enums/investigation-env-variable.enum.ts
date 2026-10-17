@@ -10,7 +10,7 @@ export enum InvestigationEnvVariable {
   AgentModel = 'INVESTIGATION_AGENT_MODEL',
   // Override the AGENT_* defaults for investigation runs, only when set.
   MaxTurns = 'INVESTIGATION_MAX_TURNS',
-  /** Backend queries; a check costs two per role (window and baseline). */
+  /** Backend queries; a metrics check costs two per role, a logs or traces check up to 11. */
   MaxQueries = 'INVESTIGATION_MAX_QUERIES',
   TimeoutSeconds = 'INVESTIGATION_TIMEOUT_SECONDS',
   // Health evaluation (.docs/design/health-evaluation.md).
@@ -18,4 +18,9 @@ export enum InvestigationEnvVariable {
   DeviationMinRun = 'INVESTIGATION_DEVIATION_MIN_RUN',
   DeviationMinEffectPercent = 'INVESTIGATION_DEVIATION_MIN_EFFECT_PERCENT',
   StepFloorSeconds = 'INVESTIGATION_STEP_FLOOR_SECONDS',
+  // Evidence sampling (.docs/design/log-and-trace-evidence.md).
+  /** Log lines per time slice. */
+  LogSampleLimit = 'INVESTIGATION_LOG_SAMPLE_LIMIT',
+  /** Traces per time slice. */
+  TraceSampleLimit = 'INVESTIGATION_TRACE_SAMPLE_LIMIT',
 }

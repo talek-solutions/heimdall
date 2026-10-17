@@ -41,11 +41,13 @@ export class CheckList {
   }
 
   add(draft: ICheckDraft): void {
-    // Logs and traces are narrowed per step, so the same component can be read several ways.
+    // Logs and traces are narrowed per step, so the same component can be read several ways; a
+    // trace query also depends on the end of the hop it reads (client or server spans).
     const key = [
       draft.kind,
       draft.indicator?.id ?? draft.subject,
       JSON.stringify(draft.match ?? {}),
+      draft.kind === CheckKind.Traces ? (draft.hop?.side ?? '') : '',
     ].join('|');
     const index = this.byKey.get(key);
     const existing = index === undefined ? undefined : this.drafts[index];

@@ -13,6 +13,7 @@ import { ObjectiveVerdict, PreliminarySignal } from '../health/health.enums';
 import { PromQlCompiler } from '../queries/promql.compiler';
 import { queryWindow, zoomWindow, type IQueryWindow } from '../queries/step-policy';
 import type { ICheckProblem, IRoleResult } from './check-result.interface';
+import { ResultKind } from './result-kind.enum';
 
 const QUERIES_PER_ROLE = 2;
 const SIGNIFICANT_DIGITS = 4;
@@ -93,12 +94,12 @@ export class CheckRunner {
 
     try {
       const [current, baseline] = await Promise.all([
-        this.metrics.queryRange(session.source, {
+        this.metrics.queryRange(session.sources.metrics, {
           ...request,
           start: window.start,
           end: window.end,
         }),
-        this.metrics.queryRange(session.source, {
+        this.metrics.queryRange(session.sources.metrics, {
           ...request,
           start: window.baselineStart,
           end: window.start,
@@ -239,10 +240,11 @@ export class CheckRunner {
     window: IQueryWindow,
   ): Pick<
     IRoleResult,
-    'result' | 'check' | 'indicator' | 'subject' | 'role' | 'expectation' | 'window'
+    'result' | 'kind' | 'check' | 'indicator' | 'subject' | 'role' | 'expectation' | 'window'
   > {
     return {
       result: id,
+      kind: ResultKind.Indicator,
       check: target.check,
       indicator: target.indicator.id,
       subject: target.indicator.subject,

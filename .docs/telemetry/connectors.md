@@ -1,9 +1,12 @@
 # Telemetry connectors
 
-Read-only HTTP connectors for the Grafana stack (ADR 0009). Implemented in `libs/telemetry`
-and exported from `@heimdall/telemetry/connectors`.
+Read-only HTTP connectors for the Grafana stack (ADR 0009). Implemented in `libs/telemetry` and
+**internal to it**: the package exports only the redacting `MetricsSource`, `LogsSource` and
+`TracesSource`, which wrap these connectors (ADR 0008, amendment closed). The rules the sources
+apply are in [redaction-and-scrubbers.md](../design/redaction-and-scrubbers.md).
 
-> **Results are not redacted.** See the ADR 0008 amendment before passing any of them to a model.
+> **Connector results are not redacted.** Nothing outside `libs/telemetry` may use them; a guard
+> spec enforces it.
 
 ## Input: only what a connector needs
 
@@ -28,12 +31,24 @@ nothing reaches the network. See [fixtures.md](fixtures.md) and ADR 0014.
 
 ## Usage
 
-```ts
-import { TelemetryModule, TelemetryConnectorFactory } from '@heimdall/telemetry/connectors';
+Inside `libs/telemetry` only, e.g. from a source:
 
+```ts
 // imports: [TelemetryModule]
 const loki = factory.loki(source);
 const result = await loki.queryRange({ query: '{service_name="checkout"} |= "timeout"', start, end });
+```
+
+Everywhere else, through the redacting sources:
+
+```ts
+import { LogsSource, TelemetrySourceModule } from '@heimdall/telemetry';
+
+// imports: [TelemetrySourceModule]
+const { records, redaction } = await logs.queryRange(source, {
+  query: '{service_name="checkout"}', start, end, limit: 250,
+  fields: { level: 'severity', msg: 'message' }, component: 'checkout',
+});
 ```
 
 ## Operations

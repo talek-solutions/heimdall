@@ -1,6 +1,6 @@
 import type { LLMFinishReason } from '@heimdall/llm';
 import type { InvestigationEventType } from '../enums';
-import type { IRoleResult } from '../execution/checks/check-result.interface';
+import type { ICheckResult } from '../execution/checks/check-result.interface';
 import type { IInvestigationReport } from '../execution/investigation-report.interface';
 import type {
   IInvestigationEntry,
@@ -50,7 +50,7 @@ export interface IAgentTurnEvent {
 
 export interface ICheckCompletedEvent {
   readonly type: InvestigationEventType.CheckCompleted;
-  readonly result: IRoleResult;
+  readonly result: ICheckResult;
 }
 
 export interface IConcludedEvent {

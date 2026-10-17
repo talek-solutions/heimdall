@@ -15,6 +15,8 @@ export const DEFAULT_DEVIATION_Z = 3.5;
 export const DEFAULT_DEVIATION_MIN_RUN = 2;
 export const DEFAULT_DEVIATION_MIN_EFFECT_PERCENT = 10;
 export const DEFAULT_STEP_FLOOR_SECONDS = 1;
+export const DEFAULT_LOG_SAMPLE_LIMIT = 250;
+export const DEFAULT_TRACE_SAMPLE_LIMIT = 10;
 
 const DEFAULT_MIN_CONFIDENCE = 0.5;
 const DEFAULT_AMBIGUITY_MARGIN = 0.15;
@@ -71,6 +73,20 @@ function resolveExecution(config: ConfigService): IExecutionConfig {
           DEFAULT_DEVIATION_MIN_EFFECT_PERCENT,
           0,
         ) / 100,
+    },
+    evidence: {
+      logSampleLimit: resolveCount(
+        config,
+        InvestigationEnvVariable.LogSampleLimit,
+        DEFAULT_LOG_SAMPLE_LIMIT,
+        1,
+      ),
+      traceSampleLimit: resolveCount(
+        config,
+        InvestigationEnvVariable.TraceSampleLimit,
+        DEFAULT_TRACE_SAMPLE_LIMIT,
+        1,
+      ),
     },
   };
 }

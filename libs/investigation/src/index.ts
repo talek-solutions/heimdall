@@ -5,7 +5,15 @@ export { resolveInvestigationConfig } from './config/investigation-config.resolv
 export * from './enums';
 export * from './errors';
 export type * from './interfaces';
-export type { IRoleResult, ICheckProblem } from './execution/checks/check-result.interface';
+export type {
+  ICheckProblem,
+  ICheckResult,
+  IEvidenceResult,
+  IRoleResult,
+} from './execution/checks/check-result.interface';
+export { ResultKind } from './execution/checks/result-kind.enum';
+export { OperationChange } from './execution/evidence/evidence.enums';
+export type * from './execution/evidence/evidence-result.interface';
 export {
   ConclusionOutcome,
   MitigationTier,
@@ -21,8 +29,11 @@ export {
   InvestigationExecutionService,
   type IExecuteOptions,
 } from './execution/investigation-execution.service';
-export type { IInvestigationReport } from './execution/investigation-report.interface';
-export type { IReachedPruned } from './execution/execution.session';
+export type {
+  IInvestigationReport,
+  IReportRedaction,
+} from './execution/investigation-report.interface';
+export type { IDroppedFields, IReachedPruned } from './execution/execution.session';
 export { InvestigationTool } from './execution/tools/investigation-tool.enum';
 export { InvestigationInitService } from './investigation-init.service';
 export { InvestigationModule } from './investigation.module';

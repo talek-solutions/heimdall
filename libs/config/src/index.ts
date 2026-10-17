@@ -19,3 +19,9 @@ export {
 } from './active-context.resolver';
 export { HEIMDALL_CONFIG, HEIMDALL_CONFIG_PATH } from './config.tokens';
 export { HeimdallConfigModule } from './heimdall-config.module';
+export {
+  MAX_PATTERN_LENGTH,
+  PATTERN_RISK_MESSAGES,
+  PatternRisk,
+  patternRisk,
+} from './redaction/pattern-safety';

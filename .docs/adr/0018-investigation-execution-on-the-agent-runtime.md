@@ -54,6 +54,7 @@ All read-only, named by an enum:
 | `check_indicator` | Runs any indicator within reach, planned or not |
 | `describe_vertex`, `subgraph`, `impact` | Graph lookups (ADR 0015, level 1); no telemetry |
 | `search_logs`, `search_traces` | Redacted samples within reach (with logs and traces) |
+| `get_trace` | One redacted trace by id, e.g. a `traceId` from a log example |
 | `conclude` | The stop tool; validated before the run ends |
 
 ### Hybrid verdicts
@@ -84,13 +85,26 @@ sits deeper than the deepest unhealthy step, the origin is reported as uncertain
   - the environment's labels are added to every query
   - an indicator's `query:` replaces the template (ADR 0005)
   - the step and rate window follow the window's length
-- **Logs and traces** are compiled from each component's telemetry identity. A step's `match`
-  becomes line filters and OpenTelemetry semantic-convention attributes.
+- **Logs and traces** are compiled from each component's telemetry identity:
+  - **Logs** use the component's stream selector. Lines are parsed in code, and a step's `match`
+    drops the lines that contradict it.
+  - **Traces** read the subject's end of the hop: the caller's client or producer spans, or the
+    target's server or consumer spans. They are narrowed by the semantic-convention attributes
+    that end records.
+- **Evidence is a comparison with the baseline,** like the metrics. Logs are grouped into
+  templates, and templates that are new or surging are shown with examples. Span operations that
+  are new, slower or failing more are shown with an exemplar trace. Samples are time-sliced so a
+  capped query does not only describe the end of the window. Logs and traces results are cited as
+  evidence and carry no verdict. The rules are in
+  [`.docs/design/log-and-trace-evidence.md`](../design/log-and-trace-evidence.md).
 - **All telemetry passes through a redacting `TelemetrySource`** before it reaches a tool result
   (ADR 0008):
-  - the allowlist is the manifest's field mapping
-  - the scrubbers are the config's `redaction`
-  - every redaction is counted, so over-redaction is visible
+  - the allowlist is the manifest's field mapping for logs, and a built-in list of semantic
+    conventions for spans
+  - the scrubbers are the config's `redaction`; `additionalPatterns` are checked at load against
+    expensive patterns
+  - every redaction is counted, so over-redaction is visible. The names of dropped fields appear
+    only in the local report
   
   The rules are specified in
   [`.docs/design/redaction-and-scrubbers.md`](../design/redaction-and-scrubbers.md), written with

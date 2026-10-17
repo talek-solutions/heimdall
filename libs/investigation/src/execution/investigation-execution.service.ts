@@ -14,14 +14,19 @@ import { InvestigationEventType } from '../enums';
 import type { IInvestigationEvent, IInvestigationPlan } from '../interfaces';
 import { INVESTIGATION_CONFIG } from '../investigation.tokens';
 import { INVESTIGATION_SYSTEM_PROMPT, seedMessage } from './agent/investigation.prompt';
+import type { ICheckResult } from './checks/check-result.interface';
 import { CheckRunner } from './checks/check.runner';
+import { ResultKind } from './checks/result-kind.enum';
 import { ConclusionOutcome } from './conclusion/conclusion.enums';
 import { ConclusionValidator } from './conclusion/conclusion.validator';
 import { ExecutionSession } from './execution.session';
 import type { IInvestigationReport } from './investigation-report.interface';
-import { MetricsSourceResolver } from './sources/metrics-source.resolver';
+import type { IEvidenceRedaction } from './evidence/evidence-result.interface';
+import { EvidenceRunner } from './evidence/evidence.runner';
+import { TelemetrySourcesResolver } from './sources/telemetry-sources.resolver';
 import { checkIndicatorTool } from './tools/check-indicator.tool';
 import { concludeTool } from './tools/conclude.tool';
+import { evidenceTools } from './tools/evidence.tools';
 import { graphTools } from './tools/graph.tools';
 import { runChecksTool } from './tools/run-checks.tool';
 
@@ -41,8 +46,9 @@ export class InvestigationExecutionService {
     private readonly compiler: SystemGraphCompiler,
     private readonly agent: AgentRunner,
     private readonly checks: CheckRunner,
+    private readonly evidence: EvidenceRunner,
     private readonly validator: ConclusionValidator,
-    private readonly sources: MetricsSourceResolver,
+    private readonly sources: TelemetrySourcesResolver,
     @Inject(INVESTIGATION_CONFIG) private readonly config: IInvestigationConfig,
   ) {}
 
@@ -70,8 +76,9 @@ export class InvestigationExecutionService {
       system: INVESTIGATION_SYSTEM_PROMPT,
       messages: [{ role: LLMMessageRole.USER, content: seedMessage(plan, graph) }],
       tools: ToolRepository.of([
-        runChecksTool(session, this.checks),
+        runChecksTool(session, this.checks, this.evidence),
         checkIndicatorTool(session, this.checks),
+        ...evidenceTools(session, this.evidence),
         ...graphTools(session),
         stop,
       ]),
@@ -82,9 +89,11 @@ export class InvestigationExecutionService {
       fallbackOnRefusal: true,
       onEvent: (event) => this.forward(event, emit),
     });
+    const results = session.all;
     const shared = {
       plan,
-      results: session.all,
+      results,
+      redaction: { totals: redactionTotals(results), droppedFields: session.droppedFields },
       reachedPruned: [...session.reachedPruned],
       usage: run.usage,
       traceId: run.traceId,
@@ -115,4 +124,30 @@ export class InvestigationExecutionService {
       });
     }
   }
+}
+
+/** Sums what every evidence result redacted; the counts the agent also saw. */
+function redactionTotals(results: readonly ICheckResult[]): IEvidenceRedaction {
+  const matches = new Map<string, number>();
+  let records = 0;
+  let fieldsDropped = 0;
+  let truncated = 0;
+
+  for (const result of results) {
+    if (result.kind === ResultKind.Indicator) {
+      continue;
+    }
+    records += result.redaction.records;
+    fieldsDropped += result.redaction.fieldsDropped;
+    truncated += result.redaction.truncated;
+    for (const [scrubber, count] of Object.entries(result.redaction.matches)) {
+      matches.set(scrubber, (matches.get(scrubber) ?? 0) + count);
+    }
+  }
+  return {
+    records,
+    fieldsDropped,
+    truncated,
+    matches: Object.fromEntries([...matches].sort(([a], [b]) => a.localeCompare(b))),
+  };
 }

@@ -34,6 +34,7 @@ export function testConfig(overrides: Partial<IInvestigationConfig> = {}): IInve
       budget: {},
       stepFloorSeconds: 1,
       deviation: { z: 3.5, minRun: 2, minEffect: 0.1 },
+      evidence: { logSampleLimit: 250, traceSampleLimit: 10 },
     },
     ...overrides,
   };
@@ -54,9 +55,12 @@ export function referenceManifestPath(name: ReferenceManifest): string {
   return join(directory, relative);
 }
 
-export async function loadManifest(name: ReferenceManifest): Promise<IManifestV1> {
+export async function loadManifest(
+  name: ReferenceManifest,
+  edit: (text: string) => string = (text) => text,
+): Promise<IManifestV1> {
   return new ManifestReader(new ManifestV1Parser()).parse(
-    readFileSync(referenceManifestPath(name), 'utf8'),
+    edit(readFileSync(referenceManifestPath(name), 'utf8')),
   );
 }
 

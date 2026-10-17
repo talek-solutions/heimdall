@@ -13,6 +13,7 @@ export type {
   IBlindSpot,
   ICheck,
   ICheckCondition,
+  ICheckHop,
   IEntryCandidate,
   IInvestigationEntry,
   IInvestigationPlan,

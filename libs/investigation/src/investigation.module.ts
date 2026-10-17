@@ -8,9 +8,12 @@ import { clockProvider } from './config/clock.provider';
 import { investigationConfigProvider } from './config/investigation-config.provider';
 import { CheckRunner } from './execution/checks/check.runner';
 import { ConclusionValidator } from './execution/conclusion/conclusion.validator';
+import { EvidenceRunner } from './execution/evidence/evidence.runner';
 import { InvestigationExecutionService } from './execution/investigation-execution.service';
+import { LogQlCompiler } from './execution/queries/logql.compiler';
 import { PromQlCompiler } from './execution/queries/promql.compiler';
-import { MetricsSourceResolver } from './execution/sources/metrics-source.resolver';
+import { TraceQlCompiler } from './execution/queries/traceql.compiler';
+import { TelemetrySourcesResolver } from './execution/sources/telemetry-sources.resolver';
 import { InvestigationIntake } from './intake/investigation.intake';
 import { InvestigationInitService } from './investigation-init.service';
 import { INVESTIGATION_CONFIG } from './investigation.tokens';
@@ -36,9 +39,12 @@ import { SymptomTriage } from './triage/symptom.triage';
     CheckPlanner,
     InvestigationInitService,
     PromQlCompiler,
+    LogQlCompiler,
+    TraceQlCompiler,
     CheckRunner,
+    EvidenceRunner,
     ConclusionValidator,
-    MetricsSourceResolver,
+    TelemetrySourcesResolver,
     InvestigationExecutionService,
   ],
   exports: [InvestigationInitService, InvestigationExecutionService, INVESTIGATION_CONFIG],
