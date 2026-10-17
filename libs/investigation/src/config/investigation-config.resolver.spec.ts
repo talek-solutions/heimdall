@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InvestigationEnvVariable } from '../enums';
 import { InvestigationError, InvestigationErrorCode } from '../errors';
 import {
+  DEFAULT_AGENT_MODEL,
   DEFAULT_MAX_CHECKS,
   DEFAULT_TRIAGE_MODEL,
   resolveInvestigationConfig,
@@ -35,6 +36,46 @@ describe('resolveInvestigationConfig', () => {
     assert.equal(config.lookbackMs, 2 * 3_600_000);
     assert.equal(config.hopBudget, 0);
     assert.equal(config.maxChecks, 10);
+  });
+
+  it('defaults execution, and overrides agent budgets only for the variables that are set', () => {
+    const defaults = resolve({});
+    const set = resolve({
+      [InvestigationEnvVariable.AgentModel]: 'claude-opus-5',
+      [InvestigationEnvVariable.MaxTurns]: '8',
+      [InvestigationEnvVariable.MaxQueries]: '40',
+      [InvestigationEnvVariable.TimeoutSeconds]: '90',
+      [InvestigationEnvVariable.DeviationZ]: '3',
+      [InvestigationEnvVariable.DeviationMinRun]: '3',
+      [InvestigationEnvVariable.DeviationMinEffectPercent]: '25',
+      [InvestigationEnvVariable.StepFloorSeconds]: '15',
+    });
+
+    assert.equal(defaults.execution.model, DEFAULT_AGENT_MODEL);
+    assert.deepEqual(defaults.execution.budget, {});
+    assert.deepEqual(defaults.execution.deviation, { z: 3.5, minRun: 2, minEffect: 0.1 });
+    assert.deepEqual(set.execution, {
+      model: 'claude-opus-5',
+      budget: { maxTurns: 8, maxToolCost: 40, timeoutMs: 90_000 },
+      stepFloorSeconds: 15,
+      deviation: { z: 3, minRun: 3, minEffect: 0.25 },
+    });
+  });
+
+  it('rejects an execution value it cannot use', () => {
+    for (const [variable, value] of [
+      [InvestigationEnvVariable.MaxTurns, '0'],
+      [InvestigationEnvVariable.DeviationZ, '-1'],
+      [InvestigationEnvVariable.StepFloorSeconds, 'fast'],
+    ] as const) {
+      assert.throws(
+        () => resolve({ [variable]: value }),
+        (error: unknown) =>
+          error instanceof InvestigationError &&
+          error.errorCode === InvestigationErrorCode.InvalidConfig &&
+          error.message.includes(variable),
+      );
+    }
   });
 
   it('rejects values it cannot use, naming the variable', () => {

@@ -89,6 +89,7 @@ describe('heimdall investigate (end to end)', () => {
       QUERY,
       '--entry',
       'functionality:checkout',
+      '--plan-only',
       '--ndjson',
     );
 
@@ -108,8 +109,19 @@ describe('heimdall investigate (end to end)', () => {
     );
   });
 
-  it('prints the plan as text and says on stderr that it stops there, unless --plan-only', () => {
+  it('prints the plan as text, and without --plan-only goes on to execute, which needs a metrics source and the provider key', () => {
     const planned = invoke({}, 'investigate', QUERY, '--entry', 'functionality:checkout');
+    const fixture = invoke(
+      {
+        [TelemetryEnvVariable.PrometheusDatasourceType]: 'fixture',
+        [TelemetryEnvVariable.FixtureScenario]: 'error-burst-30s',
+        [TelemetryEnvVariable.FixtureAnchor]: ANCHOR,
+      },
+      'investigate',
+      QUERY,
+      '--entry',
+      'functionality:checkout',
+    );
     const planOnly = invoke(
       {},
       'investigate',
@@ -119,14 +131,16 @@ describe('heimdall investigate (end to end)', () => {
       '--plan-only',
     );
 
-    assert.equal(planned.status, ExitCode.Success);
+    assert.equal(planned.status, ExitCode.Usage);
     assert.match(planned.stdout, /^investigation {2}checkouts are not working$/m);
-    assert.match(planned.stdout, /component:orders-reconcile · logs/);
     assert.doesNotMatch(planned.stdout, /heimdall:/, 'progress must never reach stdout');
-    assert.match(planned.stderr, /heimdall: entry: functionality:checkout \(flag\)/);
-    assert.match(planned.stderr, /stopped after the plan/);
+    assert.match(planned.stderr, new RegExp(InvestigationErrorCode.SourceMissing));
+    assert.equal(fixture.status, ExitCode.ProviderAuth);
+    assert.match(fixture.stderr, new RegExp(LlmErrorCode.MISSING_API_KEY));
     assert.equal(planOnly.status, ExitCode.Success);
-    assert.doesNotMatch(planOnly.stderr, /stopped after the plan/);
+    assert.match(planOnly.stdout, /component:orders-reconcile · logs/);
+    assert.match(planOnly.stderr, /heimdall: entry: functionality:checkout \(flag\)/);
+    assert.doesNotMatch(planOnly.stderr, new RegExp(LlmErrorCode.MISSING_API_KEY));
   });
 
   it('keeps progress off stderr under --quiet', () => {
@@ -136,6 +150,7 @@ describe('heimdall investigate (end to end)', () => {
       QUERY,
       '--entry',
       'functionality:checkout',
+      '--plan-only',
       '--quiet',
     );
 
@@ -156,6 +171,7 @@ describe('heimdall investigate (end to end)', () => {
       'functionality:checkout',
       '--since',
       '30s',
+      '--plan-only',
       '--json',
     );
 

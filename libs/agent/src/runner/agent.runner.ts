@@ -130,6 +130,9 @@ class AgentLoop<TOutput> {
           toolChoice: { type: LLMToolChoiceType.AUTO },
           maxTokens: this.maxTokens,
           ...(this.request.reasoning === undefined ? {} : { reasoning: this.request.reasoning }),
+          ...(this.request.fallbackOnRefusal === undefined
+            ? {}
+            : { fallbackOnRefusal: this.request.fallbackOnRefusal }),
           providerOptions: { ...this.providerOptions },
         }),
       );

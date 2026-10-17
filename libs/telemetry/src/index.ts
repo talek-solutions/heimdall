@@ -16,3 +16,8 @@ export {
 } from './datasource/telemetry-datasource-config.resolver';
 export { TELEMETRY_DATASOURCE_CONFIG } from './datasource/telemetry-datasource.tokens';
 export { TelemetryDatasourceConfigModule } from './datasource/telemetry-datasource-config.module';
+
+// Redacting sources for the engine (ADR 0008); the raw connectors stay behind './connectors'.
+export { MetricsSource } from './source/metrics.source';
+export type * from './source/metrics-source.interface';
+export { TelemetrySourceModule } from './source/telemetry-source.module';

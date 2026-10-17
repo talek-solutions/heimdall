@@ -1,7 +1,7 @@
 import { AgentErrorCode } from '@heimdall/agent';
 import { ExitCode, isHeimdallError, type ErrorResponse } from '@heimdall/core';
 import { ManifestErrorCode } from '@heimdall/core/manifest';
-import { InvestigationErrorCode } from '@heimdall/investigation';
+import { ConclusionOutcome, InvestigationErrorCode } from '@heimdall/investigation';
 import { LlmErrorCode } from '@heimdall/llm';
 import { ConfigErrorCode } from '@heimdall/config';
 import { TelemetryErrorCode } from '@heimdall/telemetry';
@@ -22,6 +22,8 @@ const USAGE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   InvestigationErrorCode.EnvironmentUnknown,
   InvestigationErrorCode.EntryNotFound,
   InvestigationErrorCode.EntryAmbiguous,
+  InvestigationErrorCode.SourceMissing,
+  InvestigationErrorCode.SourceUnsupported,
   AgentErrorCode.InvalidConfig,
   LlmErrorCode.INVALID_PROVIDER,
   TelemetryErrorCode.InvalidDatasourceConfig,
@@ -54,6 +56,11 @@ export function exitCodeForError(error: unknown): ExitCode {
     return ExitCode.BudgetExceeded;
   }
   return ExitCode.Unexpected;
+}
+
+/** A finished investigation: 3 is "no signal found", a real outcome rather than a failure (ADR 0006). */
+export function exitCodeForOutcome(outcome: ConclusionOutcome): ExitCode {
+  return outcome === ConclusionOutcome.CauseFound ? ExitCode.Success : ExitCode.NoSignal;
 }
 
 export function toErrorResponse(error: unknown): ErrorResponse {

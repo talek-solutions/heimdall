@@ -45,3 +45,21 @@ something, never to mirror the SDK.
 **The real payoff is not provider portability.** It is that `transcript/replay` implements
 the same port from a fixture, giving deterministic tests with no mocking framework. If
 this decision is ever challenged as over-engineering, that is the argument.
+
+## Amendment (2026-10-17): the execution agent's model, and refusal fallback
+
+The investigation's execution agent (ADR 0018) defaults to `claude-opus-5-5`, the current default
+Opus: newer than `claude-opus-5` and cheaper per token. Triage keeps `claude-opus-5`.
+`INVESTIGATION_AGENT_MODEL` and `INVESTIGATION_TRIAGE_MODEL` override either. The model asks for
+`reasoning: high` explicitly, because its default effort is medium.
+
+The port gains one provider-neutral flag, `fallbackOnRefusal`. When it is set and the model
+supports it, the Anthropic adapter asks for server-side fallback (`fallbacks: "default"` with the
+`server-side-fallback-2026-07-01` beta), so a request the safety filter declines is re-run on a
+fallback model instead of ending the turn. The fallback's `fallback` marker blocks, and the
+declined model's reasoning and tool calls before the last switch, are not sent back in later
+turns. The execution agent sets the flag; nothing else does yet.
+
+The port also now carries reasoning signatures and redacted reasoning both ways, and names a
+paused turn `PAUSED`. Thinking-enabled tool loops need both (ADR 0017).
+

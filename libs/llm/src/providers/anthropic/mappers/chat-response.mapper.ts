@@ -21,7 +21,7 @@ export function fromAnthropicResponse(response: AnthropicMessagesResponse): Anth
         id: response.id,
         model: response.model,
         role: LLMMessageRole.ASSISTANT,
-        content: response.content.flatMap(toOutputPart),
+        content: afterLastFallback(response.content).flatMap(toOutputPart),
         finishReason:
             response.stopReason === null
                 ? LLMFinishReason.OTHER
@@ -54,8 +54,18 @@ function toOutputPart(block: AnthropicContentBlock): ILLMOutputContentPart[] {
         case AnthropicContentBlockType.REDACTED_THINKING:
             return [{ type: LLMContentPartType.REASONING, text: '', redactedData: block.data }];
         // No abstract counterpart; available via `raw`.
+        case AnthropicContentBlockType.FALLBACK:
         case AnthropicContentBlockType.TOOL_RESULT:
         case AnthropicContentBlockType.IMAGE:
             return [];
     }
+}
+
+/**
+ * A declined model's reasoning and tool calls before the last switch to a fallback model must not
+ * be sent back in later turns; its text may. The `fallback` marker itself is only an audit trail.
+ */
+function afterLastFallback(blocks: readonly AnthropicContentBlock[]): AnthropicContentBlock[] {
+    const last = blocks.findLastIndex((block) => block.type === AnthropicContentBlockType.FALLBACK);
+    return blocks.filter((block, index) => index > last || block.type === AnthropicContentBlockType.TEXT);
 }

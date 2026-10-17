@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   SystemGraphCompiler,
   VertexType,
@@ -24,6 +25,13 @@ import { INVESTIGATION_CONFIG } from './investigation.tokens';
 import { LOCATABLE_TYPES, SymptomTriage, type ITriageResult } from './triage/symptom.triage';
 
 const ALL_ROLES: readonly IndicatorRole[] = Object.values(IndicatorRole);
+const tracer = trace.getTracer('@heimdall/investigation');
+
+enum InitSpanAttribute {
+  System = 'heimdall.investigation.system',
+  EntryMethod = 'heimdall.investigation.entry_method',
+  Checks = 'heimdall.investigation.checks',
+}
 
 /** Named entries may also be a step or a dependency, which free text never lands on. */
 const NAMEABLE_TYPES: ReadonlySet<VertexType> = new Set([
@@ -47,10 +55,35 @@ export class InvestigationInitService {
     @Inject(INVESTIGATION_CONFIG) private readonly config: IInvestigationConfig,
   ) {}
 
+  /** Spanned as `investigation.init`; ids and counts only, never the engineer's words. */
   async prepare(
     manifest: IManifestV1,
     request: IInvestigationRequest,
     options: IPrepareOptions = {},
+  ): Promise<IInvestigationPlan> {
+    return tracer.startActiveSpan('investigation.init', async (span) => {
+      try {
+        const plan = await this.plan(manifest, request, options);
+
+        span.setAttributes({
+          [InitSpanAttribute.System]: plan.system,
+          [InitSpanAttribute.EntryMethod]: plan.entry.method,
+          [InitSpanAttribute.Checks]: plan.checks.length,
+        });
+        return plan;
+      } catch (error) {
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  private async plan(
+    manifest: IManifestV1,
+    request: IInvestigationRequest,
+    options: IPrepareOptions,
   ): Promise<IInvestigationPlan> {
     const emit = (event: IInvestigationEvent): void => options.onEvent?.(event);
     const graph = this.compiler.compile(manifest);

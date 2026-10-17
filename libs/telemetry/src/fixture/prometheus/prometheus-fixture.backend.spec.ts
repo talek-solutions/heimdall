@@ -35,6 +35,14 @@ series:
   - id: noisy
     match: 'noisy_metric'
     curve: { baseline: 100, noise: { stddev: 7 } }
+  - id: requests_ok
+    match: 'http_requests_total'
+    labels: { service: checkout, code: '200' }
+    curve: { baseline: 100 }
+  - id: requests_failed
+    match: 'http_requests_total'
+    labels: { service: checkout, code: '500' }
+    curve: { baseline: 5 }
 `;
 
 function rejectedWith(fragment: string): (error: unknown) => boolean {
@@ -88,6 +96,34 @@ describe('PrometheusFixtureBackend through PrometheusConnector', () => {
     assert.equal(at(series[0], '2026-09-25T07:00:00Z'), 0.2);
     assert.equal(at(series[0], '2026-09-25T07:35:00Z'), 1.2);
     assert.equal(at(series[0], '2026-09-25T07:50:00Z'), 2.2);
+  });
+
+  it('sums the matched series for a bare sum, as Prometheus would, and routes a grouped one', async () => {
+    const range = {
+      start: new Date('2026-09-25T07:00:00Z'),
+      end: new Date('2026-09-25T07:10:00Z'),
+      stepSeconds: 300,
+    };
+    const total = matrix(
+      await prometheus.queryRange({
+        ...range,
+        query: 'sum(rate(http_requests_total{service="checkout"}[1m]))',
+      }),
+    );
+    const byCode = matrix(
+      await prometheus.queryRange({
+        ...range,
+        query: 'sum by (code) (rate(http_requests_total{service="checkout"}[1m]))',
+      }),
+    );
+
+    assert.equal(total.length, 1);
+    assert.deepEqual(total[0]?.labels, {});
+    assert.equal(at(total[0], '2026-09-25T07:05:00Z'), 105);
+    assert.deepEqual(
+      byCode.map((entry) => entry.labels['code']),
+      ['200', '500'],
+    );
   });
 
   it('returns every series of the matching family when the query does not narrow', async () => {

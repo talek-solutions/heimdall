@@ -1,15 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AgentBudgetExceededError, AgentError, AgentErrorCode, BudgetDimension } from '@heimdall/agent';
+import {
+  AgentBudgetExceededError,
+  AgentError,
+  AgentErrorCode,
+  BudgetDimension,
+} from '@heimdall/agent';
 import { ExitCode } from '@heimdall/core';
 import { ManifestError, ManifestErrorCode } from '@heimdall/core/manifest';
-import { InvestigationError, InvestigationErrorCode } from '@heimdall/investigation';
+import {
+  ConclusionOutcome,
+  InvestigationError,
+  InvestigationErrorCode,
+} from '@heimdall/investigation';
 import { LlmError, LlmErrorCode } from '@heimdall/llm';
 import { ConfigError, ConfigErrorCode } from '@heimdall/config';
 import { TelemetryError, TelemetryErrorCode } from '@heimdall/telemetry';
 import { CliError } from './cli.error';
 import { CliErrorCode } from './cli-error-code.enum';
-import { exitCodeForError, toErrorResponse } from './error-exit.mapper';
+import { exitCodeForError, exitCodeForOutcome, toErrorResponse } from './error-exit.mapper';
 
 describe('exitCodeForError', () => {
   it('maps CLI and config errors to Usage', () => {
@@ -125,6 +134,23 @@ describe('exitCodeForError', () => {
       ExitCode.Unexpected,
     );
     assert.equal(exitCodeForError(new Error('boom')), ExitCode.Unexpected);
+  });
+});
+
+describe('exitCodeForOutcome', () => {
+  it('exits 0 for a cause and 3 for no signal or no conclusion', () => {
+    assert.equal(exitCodeForOutcome(ConclusionOutcome.CauseFound), ExitCode.Success);
+    assert.equal(exitCodeForOutcome(ConclusionOutcome.NoSignal), ExitCode.NoSignal);
+    assert.equal(exitCodeForOutcome(ConclusionOutcome.Inconclusive), ExitCode.NoSignal);
+  });
+
+  it('treats a missing or unsupported metrics source as a usage error', () => {
+    for (const code of [
+      InvestigationErrorCode.SourceMissing,
+      InvestigationErrorCode.SourceUnsupported,
+    ]) {
+      assert.equal(exitCodeForError(new InvestigationError(code, 'x')), ExitCode.Usage, code);
+    }
   });
 });
 

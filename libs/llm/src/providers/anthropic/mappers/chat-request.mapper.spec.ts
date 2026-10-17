@@ -14,6 +14,7 @@ import {
     AnthropicCacheControlType,
     AnthropicContentBlockType,
     AnthropicEffort,
+    AnthropicFallbackMode,
     AnthropicMessageRole,
     AnthropicOutputFormatType,
     AnthropicTaskBudgetType,
@@ -79,6 +80,13 @@ describe('toAnthropicRequest', () => {
                 }),
             'REASONING parts are only valid in ASSISTANT messages',
         );
+    });
+
+    it('asks for server-side fallback only when allowed and only on models that accept it', () => {
+        assert.equal(toAnthropicRequest({ ...minimal, model: AnthropicModel.OPUS_5_5, fallbackOnRefusal: true }).fallbacks, AnthropicFallbackMode.DEFAULT);
+        assert.equal(toAnthropicRequest({ ...minimal, fallbackOnRefusal: true }).fallbacks, AnthropicFallbackMode.DEFAULT);
+        assert.equal(toAnthropicRequest({ ...minimal, model: AnthropicModel.OPUS_5_5 }).fallbacks, undefined);
+        assert.equal(toAnthropicRequest({ ...minimal, model: AnthropicModel.HAIKU_4_5, fallbackOnRefusal: true }).fallbacks, undefined);
     });
 
     it('rejects a model outside the AnthropicModel enum', () => {

@@ -40,6 +40,27 @@ describe('fromAnthropicResponse', () => {
         ]);
     });
 
+    it('keeps only text from before the last fallback switch, and drops the switch markers', () => {
+        const result = fromAnthropicResponse({
+            ...base,
+            model: 'claude-opus-5',
+            content: [
+                { type: AnthropicContentBlockType.THINKING, thinking: 'declined', signature: 'old' },
+                { type: AnthropicContentBlockType.TOOL_USE, id: 'c0', name: 'lookup', input: {} },
+                { type: AnthropicContentBlockType.TEXT, text: 'partial' },
+                { type: AnthropicContentBlockType.FALLBACK, from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } },
+                { type: AnthropicContentBlockType.THINKING, thinking: 'served', signature: 'new' },
+                { type: AnthropicContentBlockType.TOOL_USE, id: 'c1', name: 'lookup', input: { q: 1 } },
+            ],
+        });
+
+        assert.deepEqual(result.content, [
+            { type: LLMContentPartType.TEXT, text: 'partial' },
+            { type: LLMContentPartType.REASONING, text: 'served', signature: 'new' },
+            { type: LLMContentPartType.TOOL_CALL, id: 'c1', name: 'lookup', input: { q: 1 } },
+        ]);
+    });
+
     it('normalizes every stop reason', () => {
         const cases: Array<[AnthropicStopReason | null, LLMFinishReason]> = [
             [AnthropicStopReason.END_TURN, LLMFinishReason.STOP],

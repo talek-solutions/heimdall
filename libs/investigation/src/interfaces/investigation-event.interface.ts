@@ -1,4 +1,7 @@
+import type { LLMFinishReason } from '@heimdall/llm';
 import type { InvestigationEventType } from '../enums';
+import type { IRoleResult } from '../execution/checks/check-result.interface';
+import type { IInvestigationReport } from '../execution/investigation-report.interface';
 import type {
   IInvestigationEntry,
   IInvestigationPlan,
@@ -36,10 +39,32 @@ export interface IPlanReadyEvent {
   readonly plan: IInvestigationPlan;
 }
 
+export interface IAgentTurnEvent {
+  readonly type: InvestigationEventType.AgentTurn;
+  readonly turn: number;
+  readonly finishReason: LLMFinishReason;
+  readonly toolCalls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+export interface ICheckCompletedEvent {
+  readonly type: InvestigationEventType.CheckCompleted;
+  readonly result: IRoleResult;
+}
+
+export interface IConcludedEvent {
+  readonly type: InvestigationEventType.Concluded;
+  readonly report: IInvestigationReport;
+}
+
 /** What the engine reports as it goes; renderers subscribe, the engine never prints (ADR 0006). */
 export type IInvestigationEvent =
   | IInvestigationStartedEvent
   | ISymptomClassifiedEvent
   | IEntryLocatedEvent
   | IScopeResolvedEvent
-  | IPlanReadyEvent;
+  | IPlanReadyEvent
+  | IAgentTurnEvent
+  | ICheckCompletedEvent
+  | IConcludedEvent;

@@ -103,7 +103,7 @@ describe('AgentRunner', () => {
     it('sends tools through the provider port, with auto tool choice and its request options', async () => {
       const llm = new ScriptedLlmProvider([reply([CONCLUDE])]);
 
-      await runner(llm).run(runRequest());
+      await runner(llm).run(runRequest({ fallbackOnRefusal: true }));
       const [request] = llm.requests;
 
       assert.deepEqual(
@@ -116,6 +116,7 @@ describe('AgentRunner', () => {
       assert.deepEqual(request?.toolChoice, { type: LLMToolChoiceType.AUTO });
       assert.deepEqual(request?.providerOptions, { systemCacheControl: { type: 'ephemeral' } });
       assert.equal(request?.system, 'You test.');
+      assert.equal(request?.fallbackOnRefusal, true);
     });
 
     it('only ever appends to the history it sends', async () => {

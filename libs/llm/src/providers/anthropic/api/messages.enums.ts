@@ -16,6 +16,13 @@ export enum AnthropicContentBlockType {
     TOOL_USE = 'tool_use',
     TOOL_RESULT = 'tool_result',
     IMAGE = 'image',
+    /** An audit marker where a declined request switched to a fallback model. */
+    FALLBACK = 'fallback',
+}
+
+export enum AnthropicFallbackMode {
+    /** Anthropic picks the fallback model by refusal category. */
+    DEFAULT = 'default',
 }
 
 export enum AnthropicImageSourceType {

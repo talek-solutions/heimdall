@@ -2,7 +2,7 @@ import { LlmError, LlmErrorCode } from '../../errors';
 import type { IAnthropicConfig } from '../../config/llm-config.model';
 import type { LlmApiClient } from '../llm-api.client';
 import type { ILLMProvider } from '../llm-provider.interface';
-import { AnthropicApiKeyHeader, AnthropicBetaHeader, AnthropicVersionHeader } from './anthropic.constants';
+import { AnthropicApiKeyHeader, AnthropicBetaHeader, AnthropicServerSideFallbackBeta, AnthropicVersionHeader } from './anthropic.constants';
 import { AnthropicApiEndpoints } from './anthropic.enums';
 import type { AnthropicProviderOptions } from './anthropic.options';
 import type { AnthropicMessagesRequest } from './api/messages.request';
@@ -20,7 +20,12 @@ export class AnthropicProvider implements ILLMProvider<AnthropicProviderOptions,
     ) {}
 
     public async chat(request: AnthropicChatRequest): Promise<AnthropicChatResponse> {
-        const response = await this.messages(toAnthropicRequest(request), request.providerOptions?.betas);
+        const anthropicRequest = toAnthropicRequest(request);
+        const betas = request.providerOptions?.betas ?? [];
+        const response = await this.messages(
+            anthropicRequest,
+            anthropicRequest.fallbacks === undefined ? betas : [...betas, AnthropicServerSideFallbackBeta],
+        );
         return fromAnthropicResponse(response);
     }
 

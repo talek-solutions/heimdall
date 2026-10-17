@@ -5,6 +5,9 @@ export const AnthropicVersionHeader = 'anthropic-version';
 /** Comma-separated list of beta feature flags (e.g. task budgets). */
 export const AnthropicBetaHeader = 'anthropic-beta';
 
+/** Gates `fallbacks: "default"`; the array form uses a different flag. */
+export const AnthropicServerSideFallbackBeta = 'server-side-fallback-2026-07-01';
+
 export const AnthropicWorkspaceIdHeader = 'anthropic-workspace-id';
 
 export const AnthropicUserProfileIdHeader = 'anthropic-user-profile-id';

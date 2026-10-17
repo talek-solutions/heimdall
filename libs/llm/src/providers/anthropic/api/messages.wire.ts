@@ -8,6 +8,7 @@ import {
     AnthropicCacheControlType,
     AnthropicContentBlockType,
     AnthropicEffort,
+    AnthropicFallbackMode,
     AnthropicImageSourceType,
     AnthropicMessageRole,
     AnthropicMessageType,
@@ -71,6 +72,12 @@ export interface AnthropicWireImageBlock {
     cache_control?: AnthropicWireCacheControl;
 }
 
+export interface AnthropicWireFallbackBlock {
+    type: AnthropicContentBlockType.FALLBACK;
+    from: { model: string };
+    to: { model: string };
+}
+
 export type AnthropicWireToolResultContent =
     | AnthropicWireTextBlock
     | AnthropicWireImageBlock;
@@ -89,7 +96,8 @@ export type AnthropicWireContentBlock =
     | AnthropicWireRedactedThinkingBlock
     | AnthropicWireToolUseBlock
     | AnthropicWireToolResultBlock
-    | AnthropicWireImageBlock;
+    | AnthropicWireImageBlock
+    | AnthropicWireFallbackBlock;
 
 export interface AnthropicWireMessageParam {
     role: AnthropicMessageRole;
@@ -184,6 +192,7 @@ export interface AnthropicWireMessagesRequest {
     tool_choice?: AnthropicWireToolChoice;
     thinking?: AnthropicWireThinkingConfig;
     output_config?: AnthropicWireOutputConfig;
+    fallbacks?: AnthropicFallbackMode;
 }
 
 export interface AnthropicWireStopDetails {

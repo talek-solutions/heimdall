@@ -34,6 +34,16 @@ export interface AnthropicRedactedThinkingBlock {
     data: string;
 }
 
+export interface AnthropicFallbackModelRef {
+    model: string;
+}
+
+export interface AnthropicFallbackBlock {
+    type: AnthropicContentBlockType.FALLBACK;
+    from: AnthropicFallbackModelRef;
+    to: AnthropicFallbackModelRef;
+}
+
 export interface AnthropicToolUseBlock {
     type: AnthropicContentBlockType.TOOL_USE;
     id: string;
@@ -81,7 +91,8 @@ export type AnthropicContentBlock =
     | AnthropicRedactedThinkingBlock
     | AnthropicToolUseBlock
     | AnthropicToolResultBlock
-    | AnthropicImageBlock;
+    | AnthropicImageBlock
+    | AnthropicFallbackBlock;
 
 export interface AnthropicUsage {
     inputTokens: number;

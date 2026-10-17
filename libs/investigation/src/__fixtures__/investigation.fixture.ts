@@ -29,6 +29,12 @@ export function testConfig(overrides: Partial<IInvestigationConfig> = {}): IInve
     hopBudget: 1,
     maxChecks: 200,
     triage: { model: 'test-model', minConfidence: 0.5, ambiguityMargin: 0.15, maxCandidates: 3 },
+    execution: {
+      model: 'claude-opus-5-5',
+      budget: {},
+      stepFloorSeconds: 1,
+      deviation: { z: 3.5, minRun: 2, minEffect: 0.1 },
+    },
     ...overrides,
   };
 }

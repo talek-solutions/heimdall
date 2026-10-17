@@ -13,6 +13,10 @@ TELEMETRY_FIXTURE_SCENARIO=error-burst-30s \
 heimdall investigate "checkouts are not working" --since 30s
 ```
 
+This plans the investigation and then runs it with the execution agent (ADR 0018), which needs
+`ANTHROPIC_API_KEY`. Add `--plan-only` to stop after the plan, with no model call beyond triage, or
+`--entry functionality:checkout` to skip triage as well.
+
 ## The system
 
 The browser posts a cart to `checkout`, which reserves stock in `inventory`, records the order in
@@ -79,7 +83,8 @@ From `functionality:checkout`, with the default hop budget of 1:
 
 ### `increased-latency-1`: "checkout is slow"
 
-1. **Confirm.** The `place-order` p99 SLO (≤ 1s) is breached; the KPI barely moves.
+1. **Confirm.** The `place-order` p99 SLO (≤ 1s) is breached. Successful checkouts fall by about a
+   quarter from T−24m as requests queue: a consequence of the latency, not a second fault.
 2. **Localise.** Steps 1 and 3 (`UPDATE orders`) are slow; `inventory` and `payments` are
    healthy. The deepest slow hop is step 3.
 3. **Explain.** Behind step 3, `orders-pg` shows a transaction over the 30s threshold and lock

@@ -5,6 +5,7 @@
 import { AnthropicModel } from '../anthropic.enums';
 import {
     AnthropicEffort,
+    AnthropicFallbackMode,
     AnthropicMessageRole,
     AnthropicOutputFormatType,
     AnthropicTaskBudgetType,
@@ -123,4 +124,6 @@ export interface AnthropicMessagesRequest {
     toolChoice?: AnthropicToolChoice;
     thinking?: AnthropicThinkingConfig;
     outputConfig?: AnthropicOutputConfig;
+    /** Re-runs a declined request on a fallback model server-side; needs `AnthropicServerSideFallbackBeta`. */
+    fallbacks?: AnthropicFallbackMode;
 }

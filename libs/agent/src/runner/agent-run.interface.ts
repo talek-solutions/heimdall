@@ -26,6 +26,8 @@ export interface IAgentRunRequest<TOutput> {
   /** Per model call. */
   readonly maxTokens?: number;
   readonly reasoning?: ILLMReasoningConfig;
+  /** Let the provider re-run a declined turn on a fallback model, where the model supports it. */
+  readonly fallbackOnRefusal?: boolean;
   /** Without it, a mutating tool is refused (ADR 0002). */
   readonly confirm?: (call: IToolConfirmation) => Promise<boolean>;
   readonly onEvent?: (event: IAgentEvent) => void;

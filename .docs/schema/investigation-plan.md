@@ -2,8 +2,10 @@
 
 The init phase of [ADR 0016](../adr/0016-investigation-init-phase.md) for
 [US-001](../user-stories/US-001-on-demand-investigation.md): from an engineer's words to an ordered
-plan of checks. Implemented in `libs/investigation` (`@heimdall/investigation`) on top of the graph
-in `@heimdall/core/graph`.
+plan of checks. Then, unless `--plan-only`, the execution phase of
+[ADR 0018](../adr/0018-investigation-execution-on-the-agent-runtime.md) runs the plan and concludes
+([Execution](#execution) below). Implemented in `libs/investigation` (`@heimdall/investigation`) on
+top of the graph in `@heimdall/core/graph` and the agent runtime in `@heimdall/agent`.
 
 ```bash
 heimdall investigate "checkouts are not working" --env prod
@@ -17,8 +19,8 @@ heimdall investigate "checkouts are not working" --env prod
 | `--env <name>` | An environment of the manifest's `System`; optional when it has exactly one |
 | `--since <duration>` | How far back to look: `45s`, `30m`, `2h`, `1d`. Default `INVESTIGATION_LOOKBACK`, else `60m` |
 | `--entry <vertex>` | Start here, e.g. `functionality:checkout`; the model is not called and the symptom is unclassified |
-| `--plan-only` | Stop after the plan. Running checks does not exist yet, so today this only silences the notice saying so |
-| `--json` | The plan as one JSON object on stdout |
+| `--plan-only` | Stop after the plan, without running any check or calling the execution model |
+| `--json` | The report as one JSON object on stdout; the plan under `--plan-only` |
 | `--ndjson` | Each stage as one JSON event per line on stdout |
 | `--quiet` | No progress on stderr |
 
@@ -110,6 +112,62 @@ the plan. Times are ISO-8601 strings.
 | `investigation.entry_located` | `entry` |
 | `investigation.scope_resolved` | `scope` |
 | `investigation.plan_ready` | `plan` |
+| `investigation.agent_turn` | `turn`, `finishReason`, `toolCalls`, `inputTokens`, `outputTokens` (execution) |
+| `investigation.check_completed` | `result`, one per role of a check (execution) |
+| `investigation.concluded` | `report` (execution, last) |
+
+## Execution
+
+Without `--plan-only`, an agent runs the plan's checks against the environment's metrics and ends
+with a conclusion that code has checked
+([ADR 0018](../adr/0018-investigation-execution-on-the-agent-runtime.md)). The health rules behind
+every result are in [health-evaluation.md](../design/health-evaluation.md).
+
+**Where the metrics come from.** In fixture mode, the fixture. Otherwise, the Prometheus source of
+the environment's `context` in `~/.heimdall/config.yaml`. Logs and traces checks are listed in the
+plan, but are not run yet: they return `INVESTIGATION_CHECK_UNAVAILABLE`.
+
+**Tools the agent has**, all read-only:
+
+| Tool | Does |
+|---|---|
+| `run_checks` | Runs planned checks by id, optionally over a narrower window inside the plan's |
+| `check_indicator` | Runs any indicator whose subject is in scope; a pruned subject needs a reason, kept in the report |
+| `describe_vertex`, `subgraph`, `impact` | Reads the graph; no telemetry |
+| `conclude` | Ends the run; a rejected conclusion comes back once, a second rejection fails the run |
+
+**Variables**, read through the investigation config provider:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `INVESTIGATION_AGENT_MODEL` | `claude-opus-5-5` | Model for the execution agent |
+| `INVESTIGATION_MAX_TURNS` | `AGENT_MAX_TURNS` (16) | Model calls per run |
+| `INVESTIGATION_MAX_QUERIES` | `AGENT_MAX_TOOL_COST` (120) | Backend queries per run; each role of a check costs two |
+| `INVESTIGATION_TIMEOUT_SECONDS` | `AGENT_TIMEOUT_SECONDS` (300) | Wall-clock time per run |
+| `INVESTIGATION_DEVIATION_Z` | `3.5` | Robust z-score a point must reach to deviate |
+| `INVESTIGATION_DEVIATION_MIN_RUN` | `2` | Consecutive points that make a deviation, or a breach |
+| `INVESTIGATION_DEVIATION_MIN_EFFECT_PERCENT` | `10` | Change against the baseline median a point must also reach |
+| `INVESTIGATION_STEP_FLOOR_SECONDS` | `1` | Smallest query step |
+
+The remaining `AGENT_*` limits (tool calls, tokens, concurrency) are in
+[ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md).
+
+**The report** (`--json`, and the `investigation.concluded` event) carries:
+- the plan
+- the outcome (`cause-found`, `no-signal`, `inconclusive`)
+- the conclusion: summary, cause, origin, verdicts, evidence, confidence, mitigations
+- every result (shape in [health-evaluation.md](../design/health-evaluation.md#what-the-agent-receives))
+- the pruned vertices looked at, with their reasons
+- usage: turns, tool calls, queries, tokens, time
+- the trace id, when tracing is on
+
+Text prints it after the plan.
+
+| Outcome | Exit |
+|---|---|
+| `cause-found` | 0 |
+| `no-signal`, `inconclusive` | 3 |
+| budget spent (`AGENT_BUDGET_EXCEEDED`) | 5 |
 
 ## Ambiguity
 
@@ -132,4 +190,13 @@ picks one; the entry's method is then `prompt`. Without one, the command exits 2
 | `INVESTIGATION_ENTRY_AMBIGUOUS` | several candidates fit and nobody could choose | 2 |
 | `INVESTIGATION_TRIAGE_FAILED` | the model's answer stayed invalid after one retry | 1 |
 | `MANIFEST_*` | see [heimdall-manifest.md](heimdall-manifest.md) | 2 |
-| `LLM_MISSING_API_KEY`, `LLM_AUTHENTICATION_FAILED` | no `--entry`, and the model cannot be reached | 4 |
+| `LLM_MISSING_API_KEY`, `LLM_AUTHENTICATION_FAILED` | the triage or execution model cannot be reached | 4 |
+| `INVESTIGATION_SOURCE_MISSING` | execution needs a Prometheus source and the environment's context has none | 2 |
+| `INVESTIGATION_SOURCE_UNSUPPORTED` | the context reaches metrics only through Grafana, which execution cannot query yet | 2 |
+| `INVESTIGATION_CONCLUSION_INVALID` | the agent's conclusion was rejected twice | 1 |
+| `AGENT_BUDGET_EXCEEDED` | the run spent a budget before concluding ([ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md)) | 5 |
+| `AGENT_INVALID_CONFIG` | an `AGENT_*` variable cannot be used. Checked at startup | 2 |
+
+These are returned to the agent as tool results, not raised: `INVESTIGATION_UNKNOWN_CHECK`,
+`INVESTIGATION_UNKNOWN_VERTEX`, `INVESTIGATION_OUT_OF_REACH`, `INVESTIGATION_CHECK_UNAVAILABLE`,
+`INVESTIGATION_NO_QUERY_TEMPLATE`, `INVESTIGATION_NO_METRICS_IDENTITY`, `INVESTIGATION_QUERY_FAILED`.

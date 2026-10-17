@@ -87,6 +87,8 @@ export interface ILLMProviderMessageRequest<
     toolChoice?: ILLMToolChoice;
     responseFormat?: ILLMResponseFormat;
     reasoning?: ILLMReasoningConfig;
+    /** Re-run a request the provider's safety filter declines on a fallback model it picks, where the model supports it. */
+    fallbackOnRefusal?: boolean;
     /** Opaque caller metadata forwarded to the provider where supported (e.g. end-user id). */
     metadata?: Record<string, string>;
     /** Escape hatch for provider-specific parameters; typed by each provider. */

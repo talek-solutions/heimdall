@@ -1,4 +1,7 @@
 export type {
+  IAgentTurnEvent,
+  ICheckCompletedEvent,
+  IConcludedEvent,
   IEntryLocatedEvent,
   IInvestigationEvent,
   IInvestigationStartedEvent,

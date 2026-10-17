@@ -16,6 +16,7 @@ import {
   type IFixtureResponse,
 } from '../fixture-backend';
 import type { IMetricSeries } from '../scenario/scenario.model';
+import { aggregateMatrix, aggregateVector, bareAggregation } from './bare-aggregation';
 
 enum PrometheusErrorType {
   BadData = 'bad_data',
@@ -80,7 +81,12 @@ export class PrometheusFixtureBackend implements IFixtureBackend {
       raw === null || raw === '' ? this.timeline.anchorMs : this.parseTime(raw, PrometheusParam.Time);
     const result = this.evaluator.vector(matched, timeMs);
 
-    return this.success(PrometheusResultType.Vector, result);
+    const aggregation = bareAggregation(this.query(params));
+
+    return this.success(
+      PrometheusResultType.Vector,
+      aggregation === undefined ? result : aggregateVector(aggregation, result),
+    );
   }
 
   private range(params: URLSearchParams): IFixtureResponse {
@@ -99,11 +105,16 @@ export class PrometheusFixtureBackend implements IFixtureBackend {
     }
     const result = this.evaluator.matrix(matched, startMs, endMs, stepMs);
 
-    return this.success(PrometheusResultType.Matrix, result);
+    const aggregation = bareAggregation(this.query(params));
+
+    return this.success(
+      PrometheusResultType.Matrix,
+      aggregation === undefined ? result : aggregateMatrix(aggregation, result),
+    );
   }
 
   private match(params: URLSearchParams): IMetricSeries[] {
-    const query = params.get(PrometheusParam.Query) ?? '';
+    const query = this.query(params);
 
     if (query.trim() === '') {
       throw new FixtureRequestError(
@@ -116,6 +127,10 @@ export class PrometheusFixtureBackend implements IFixtureBackend {
       );
     }
     return selectMatching(query, this.series);
+  }
+
+  private query(params: URLSearchParams): string {
+    return params.get(PrometheusParam.Query) ?? '';
   }
 
   /** RFC 3339 or unix seconds, as Prometheus accepts. */

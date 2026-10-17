@@ -6,6 +6,7 @@ import {
     AnthropicCacheControlType,
     AnthropicContentBlockType,
     AnthropicEffort,
+    AnthropicFallbackMode,
     AnthropicImageSourceType,
     AnthropicMessageRole,
     AnthropicMessageType,
@@ -208,6 +209,24 @@ describe('fromWireResponse', () => {
         assert.throws(
             () => fromWireResponse({ id: 'x' } as unknown as AnthropicWireMessagesResponse),
             (error: unknown) => error instanceof LlmError && error.errorCode === LlmErrorCode.INVALID_RESPONSE,
+        );
+    });
+
+    it('parses a fallback marker, and sends fallbacks as given', () => {
+        const parsed = fromWireResponse({
+            ...wire,
+            content: [{ type: AnthropicContentBlockType.FALLBACK, from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } }],
+        });
+
+        assert.deepEqual(parsed.content, [{ type: 'fallback', from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } }]);
+        assert.equal(
+            toWireRequest({
+                model: AnthropicModel.OPUS_5_5,
+                maxTokens: 1,
+                messages: [{ role: AnthropicMessageRole.USER, content: 'hi' }],
+                fallbacks: AnthropicFallbackMode.DEFAULT,
+            }).fallbacks,
+            'default',
         );
     });
 

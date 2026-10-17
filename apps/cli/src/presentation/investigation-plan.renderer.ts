@@ -35,7 +35,16 @@ export function describeProgress(event: IInvestigationEvent): string | undefined
     case InvestigationEventType.ScopeResolved:
       return `scope: ${event.scope.vertices.length} in scope, ${event.scope.pruned.length} ruled out`;
     case InvestigationEventType.PlanReady:
+    case InvestigationEventType.Concluded:
       return undefined;
+    case InvestigationEventType.AgentTurn:
+      return `turn ${event.turn}: ${event.toolCalls === 0 ? 'no tool calls' : `${event.toolCalls} tool call${event.toolCalls === 1 ? '' : 's'}`} (${event.inputTokens} in / ${event.outputTokens} out tokens)`;
+    case InvestigationEventType.CheckCompleted: {
+      const { result } = event;
+      const what = `${result.result} ${result.check ?? result.indicator} ${result.role}`;
+      const reading = result.problem?.errorCode ?? result.verdict ?? result.signal;
+      return `${what}: ${reading}${result.onset === null ? '' : `, onset ${result.onset}`}`;
+    }
   }
 }
 

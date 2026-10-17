@@ -15,6 +15,7 @@ import type { AnthropicProviderOptions } from '../anthropic.options';
 import {
     AnthropicContentBlockType,
     AnthropicEffort,
+    AnthropicFallbackMode,
     AnthropicImageSourceType,
     AnthropicMessageRole,
     AnthropicOutputFormatType,
@@ -39,6 +40,9 @@ import type {
 
 export type AnthropicChatRequest = ILLMProviderMessageRequest<AnthropicProviderOptions>;
 
+/** Models that accept `fallbacks: "default"`; on others the flag is dropped rather than sent. */
+const SERVER_SIDE_FALLBACK_MODELS: ReadonlySet<AnthropicModel> = new Set([AnthropicModel.OPUS_5_5, AnthropicModel.OPUS_5]);
+
 const EFFORT_BY_REASONING: Readonly<Record<LLMReasoningEffort, AnthropicEffort>> = {
     [LLMReasoningEffort.LOW]: AnthropicEffort.LOW,
     [LLMReasoningEffort.MEDIUM]: AnthropicEffort.MEDIUM,
@@ -49,9 +53,10 @@ export function toAnthropicRequest(request: AnthropicChatRequest): AnthropicMess
     const options = request.providerOptions;
     const outputConfig = toOutputConfig(request, options);
     const thinking = options?.thinking ?? (request.reasoning !== undefined ? { type: AnthropicThinkingType.ADAPTIVE as const } : undefined);
+    const model = toModel(request.model);
 
     return {
-        model: toModel(request.model),
+        model,
         messages: toMessages(request.messages),
         maxTokens: request.maxTokens ?? DEFAULT_ANTHROPIC_MAX_TOKENS,
         ...(request.system !== undefined ? { system: toSystem(request.system, options) } : {}),
@@ -64,6 +69,7 @@ export function toAnthropicRequest(request: AnthropicChatRequest): AnthropicMess
         ...(request.toolChoice !== undefined ? { toolChoice: toToolChoice(request.toolChoice) } : {}),
         ...(thinking !== undefined ? { thinking } : {}),
         ...(outputConfig !== undefined ? { outputConfig } : {}),
+        ...(request.fallbackOnRefusal === true && SERVER_SIDE_FALLBACK_MODELS.has(model) ? { fallbacks: AnthropicFallbackMode.DEFAULT } : {}),
     };
 }
 

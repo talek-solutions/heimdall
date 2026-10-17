@@ -83,3 +83,17 @@ have something to catch. A scenario's `description` is never emitted in any data
 **Deferred, and binding when the engine lands:** there is no injectable clock yet. Any code
 that turns "the last hour" into timestamps must take "now" from the fixture anchor in
 fixture mode, or a pinned anchor will not line up with relative windows.
+
+## Amendment (2026-10-17): bare sum and max are evaluated
+
+Routing returns one series per matching candidate. For most queries that is what Prometheus
+would return too, but not for an aggregation around the whole query: `sum(rate(x[1m]))` over a
+counter split by status code is one series in Prometheus and several in the fixture. Execution
+(ADR 0018) builds exactly those queries, for KPIs, throughput and saturation gauges.
+
+The Prometheus fixture now evaluates a **bare** `sum(…)` or `max(…)` around the whole query, with
+no `by` or `without`: the matched candidates are combined point by point and the labels dropped,
+as Prometheus does. Everything else is still routed. Grouped aggregations, binary expressions and
+nested aggregations are untouched, so the fixture does not grow into a PromQL engine. If a third
+operator is ever needed, revisit this rather than adding it.
+

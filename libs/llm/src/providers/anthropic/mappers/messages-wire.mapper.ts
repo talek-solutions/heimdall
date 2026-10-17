@@ -66,6 +66,7 @@ export function toWireRequest(request: AnthropicMessagesRequest): AnthropicWireM
         ...(request.outputConfig !== undefined
             ? { output_config: toWireOutputConfig(request.outputConfig) }
             : {}),
+        ...(request.fallbacks !== undefined ? { fallbacks: request.fallbacks } : {}),
     };
 }
 
@@ -176,6 +177,8 @@ function toWireBlock(block: AnthropicContentBlock): AnthropicWireContentBlock {
             };
         case AnthropicContentBlockType.IMAGE:
             return toWireImageBlock(block);
+        case AnthropicContentBlockType.FALLBACK:
+            return { type: block.type, from: { model: block.from.model }, to: { model: block.to.model } };
     }
 }
 
@@ -327,6 +330,8 @@ function fromWireBlock(block: AnthropicWireContentBlock): AnthropicContentBlock 
             };
         case AnthropicContentBlockType.IMAGE:
             return fromWireImageBlock(block);
+        case AnthropicContentBlockType.FALLBACK:
+            return { type: block.type, from: { model: block.from.model }, to: { model: block.to.model } };
         default:
             throw new LlmError(
                 LlmErrorCode.INVALID_RESPONSE,

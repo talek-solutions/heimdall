@@ -5,6 +5,7 @@
 
 export enum AnthropicModel {
     FABLE_5 = 'claude-fable-5',
+    OPUS_5_5 = 'claude-opus-5-5',
     OPUS_5 = 'claude-opus-5',
     SONNET_5 = 'claude-sonnet-5',
     OPUS_4_8 = 'claude-opus-4-8',

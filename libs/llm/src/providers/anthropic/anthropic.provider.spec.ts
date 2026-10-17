@@ -112,6 +112,20 @@ describe('AnthropicProvider', () => {
         assert.equal(calls[0]?.headers['anthropic-beta'], undefined);
     });
 
+    it('asks for server-side fallback, and its beta, when a supported model may fall back on a refusal', async () => {
+        const { provider, calls } = setup('sk-test');
+
+        await provider.chat({
+            model: AnthropicModel.OPUS_5_5,
+            messages: [{ role: LLMMessageRole.USER, content: 'hi' }],
+            fallbackOnRefusal: true,
+            providerOptions: { betas: ['task-budgets-2026-03-13'] },
+        });
+
+        assert.equal((calls[0]?.body as Record<string, unknown>)['fallbacks'], 'default');
+        assert.equal(calls[0]?.headers['anthropic-beta'], 'task-budgets-2026-03-13,server-side-fallback-2026-07-01');
+    });
+
     it('surfaces provider errors from the client as LlmError', async () => {
         const { provider } = setup('sk-bad', () =>
             new Response(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }), { status: 401 }),

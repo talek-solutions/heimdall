@@ -50,7 +50,7 @@ Statuses are those of the product stories: `done`, `in progress`, `planned`, `se
 
 | # | Title | Status |
 |---|---|---|
-| [0018-01](0018-investigation-execution/01-metrics-investigation.md) | Metrics investigation | planned |
+| [0018-01](0018-investigation-execution/01-metrics-investigation.md) | Metrics investigation | done |
 | [0018-02](0018-investigation-execution/02-logs-and-traces-evidence.md) | Logs and traces evidence, with redaction | planned |
 | [0018-03](0018-investigation-execution/03-mitigations-and-report.md) | Mitigations and report | planned |
 | [0018-04](0018-investigation-execution/04-replay-and-golden-evals.md) | Replay and golden evaluations | planned |
