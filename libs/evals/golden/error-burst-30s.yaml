@@ -1,0 +1,21 @@
+# Written from the error-burst-30s walk of .docs/manifests/checkout/README.md.
+name: error-burst-30s
+description: Card charges fail for 30 seconds because the payment provider answers 5xx
+manifest: ../../../.docs/manifests/checkout/manifest.yaml
+scenario: error-burst-30s
+anchor: '2026-10-17T08:00:00.000Z'
+query: checkouts are not working
+since: 2m
+reference:
+  outcome: cause-found
+  origin: step:place-order#5
+  cause: component:payment-provider
+  mechanism: >-
+    The external payment provider answers 502 for about 30 seconds, so payments' calls to it fail
+    and every checkout that charges a card fails with them. Inventory and orders-pg are healthy;
+    the errors start at the deepest failing hop, payments to the provider.
+  evidence:
+    - the checkout KPI dips about 25 seconds before the anchor, and the place-order p99 stays under its 1s SLO
+    - steps 1 (POST /api/checkout), 4 (POST /charges) and 5 (payments to the provider) show errors; steps 2 and 3 are healthy
+    - payments' logs show the provider's 502 Bad Gateway, and its error spans end at POST /v1/payment_intents
+    - payment-provider is a blind spot, so the conclusion rests on payments' view of it

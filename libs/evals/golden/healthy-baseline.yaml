@@ -1,0 +1,13 @@
+# The control: nothing is wrong, and nothing should be blamed.
+name: healthy-baseline
+description: Nothing is wrong; the investigation should find no signal and blame nothing
+manifest: ../../../.docs/manifests/checkout/manifest.yaml
+scenario: healthy-baseline
+anchor: '2026-10-17T08:00:00.000Z'
+query: checkouts are not working
+since: 60m
+reference:
+  outcome: no-signal
+  mechanism: No fault. Every indicator in scope stays within its baseline and its SLO.
+  evidence:
+    - the KPI, the place-order p99 and every step's errors and latency are healthy

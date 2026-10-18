@@ -5,6 +5,8 @@ import { ConclusionOutcome, InvestigationErrorCode } from '@heimdall/investigati
 import { LlmErrorCode } from '@heimdall/llm';
 import { ConfigErrorCode } from '@heimdall/config';
 import { TelemetryErrorCode } from '@heimdall/telemetry';
+import { ReplayOutcome, TranscriptErrorCode } from '@heimdall/transcript';
+import { EvalErrorCode } from '@heimdall/evals';
 import { CliErrorCode } from './cli-error-code.enum';
 
 /**
@@ -29,6 +31,12 @@ const USAGE_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   TelemetryErrorCode.InvalidDatasourceConfig,
   TelemetryErrorCode.FixtureScenarioNotFound,
   TelemetryErrorCode.FixtureScenarioInvalid,
+  TranscriptErrorCode.InvalidConfig,
+  TranscriptErrorCode.NotFound,
+  TranscriptErrorCode.Invalid,
+  EvalErrorCode.CaseInvalid,
+  EvalErrorCode.CaseNotFound,
+  EvalErrorCode.CalibrationTooSmall,
 ]);
 
 /** Missing or rejected credentials, LLM or telemetry: .docs/adr/0006 reserves exit code 4 for these. */
@@ -61,6 +69,11 @@ export function exitCodeForError(error: unknown): ExitCode {
 /** A finished investigation: 3 is "no signal found", a real outcome rather than a failure (ADR 0006). */
 export function exitCodeForOutcome(outcome: ConclusionOutcome): ExitCode {
   return outcome === ConclusionOutcome.CauseFound ? ExitCode.Success : ExitCode.NoSignal;
+}
+
+/** A replay that reproduced its recording exits 0; one that did not, 6 (ADR 0006, amendment). */
+export function exitCodeForReplay(outcome: ReplayOutcome): ExitCode {
+  return outcome === ReplayOutcome.Matched ? ExitCode.Success : ExitCode.ReplayDiverged;
 }
 
 export function toErrorResponse(error: unknown): ErrorResponse {

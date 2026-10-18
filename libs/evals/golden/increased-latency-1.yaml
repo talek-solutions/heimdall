@@ -1,0 +1,23 @@
+# Written from the increased-latency-1 walk of .docs/manifests/checkout/README.md.
+name: increased-latency-1
+description: Checkout is slow because a batch job holds a long transaction on orders
+manifest: ../../../.docs/manifests/checkout/manifest.yaml
+scenario: increased-latency-1
+anchor: '2026-10-17T08:00:00.000Z'
+query: checkout is slow
+since: 60m
+reference:
+  outcome: cause-found
+  origin: step:place-order#3
+  cause: component:orders-reconcile
+  mechanism: >-
+    The orders-reconcile batch job, which only runs in the window, holds a repeatable-read
+    transaction on the orders table open for over half an hour. Checkout's UPDATE orders
+    statements wait on its locks, checkout's connection pool to orders-pg fills, and the
+    place-order p99 breaches its SLO; fewer checkouts succeed as a consequence.
+  evidence:
+    - the place-order p99 SLO is breached, and step 3 (UPDATE orders) is the deepest slow hop
+    - orders-pg shows a transaction over its 30s threshold and climbing lock counts
+    - checkout's connection pool to orders-pg is saturated
+    - orders-pg logs sessions waiting on a lock held by one process
+    - orders-reconcile logs only exist in the window and show a long-open transaction on orders

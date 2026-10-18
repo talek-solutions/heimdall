@@ -61,3 +61,12 @@ Three things were not obvious from the outside and cost real time to find:
 The contract is locked by an end-to-end test that spawns the built binary
 (`exit-code.e2e.spec.ts`) rather than by unit tests alone, because every one of these
 failures lives in the wiring between commander and nest-commander, not in our code.
+
+## Amendment (2026-10-18): exit 6, replay diverged
+
+`heimdall replay` ([ADR 0007](0007-record-replay-and-golden-evals.md)) adds one code:
+
+- `6` **replay diverged**: the replayed run did not reproduce its recording. Like `3`, it is a
+  real outcome, not a failure of the command, and a pipeline gates on it. The comparison is the
+  data on stdout: text, or one object under `--json`. A transcript that cannot be read is a usage
+  error (`2`).

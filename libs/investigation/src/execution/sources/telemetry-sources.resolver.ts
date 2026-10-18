@@ -13,6 +13,7 @@ import {
   type IConnectorSource,
   type ITelemetryDatasourceConfig,
 } from '@heimdall/telemetry';
+import { TranscriptPin, TranscriptSession } from '@heimdall/transcript';
 import { InvestigationError, InvestigationErrorCode } from '../../errors';
 import type { IPlanEnvironment } from '../../interfaces';
 import type { ICheckProblem } from '../checks/check-result.interface';
@@ -47,14 +48,20 @@ export class TelemetrySourcesResolver {
     @Inject(TELEMETRY_DATASOURCE_CONFIG) private readonly datasources: ITelemetryDatasourceConfig,
     // Global and loaded by the application; absent in specs and fixture-only runs.
     @Optional() @Inject(HEIMDALL_CONFIG) private readonly config?: IHeimdallConfig,
+    @Optional() private readonly session?: TranscriptSession,
   ) {}
 
+  /** A replay gets the sources the recorded run resolved (ADR 0007): no config file is read. */
   resolve(environment: IPlanEnvironment | undefined): IExecutionSources {
-    return {
+    const resolve = (): IExecutionSources => ({
       metrics: this.source(environment, TelemetryBackend.Prometheus),
       logs: this.optional(environment, TelemetryBackend.Loki),
       traces: this.optional(environment, TelemetryBackend.Tempo),
-    };
+    });
+
+    return this.session === undefined
+      ? resolve()
+      : this.session.pin(TranscriptPin.Sources, resolve);
   }
 
   private optional(
@@ -112,7 +119,8 @@ export class TelemetrySourcesResolver {
     const direct = sources.find((source) => source.type === backend);
 
     if (direct !== undefined) {
-      return direct;
+      // What a connector reads, and nothing else: a transcript pins this (ADR 0007).
+      return { url: direct.url, timeoutMs: direct.timeoutMs, auth: direct.auth };
     }
     if (
       sources.some(

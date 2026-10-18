@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { TelemetryBackend } from '@heimdall/config';
 import type { IConnectorSource } from '../connectors/connector-source.type';
 import type {
@@ -19,7 +19,12 @@ import {
 } from '../redaction/span-allowlist';
 import { withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
-import { REDACTOR } from './telemetry-source.tokens';
+import {
+  intercept,
+  TelemetryOperation,
+  type ITelemetrySourceInterceptor,
+} from './telemetry-source.interceptor';
+import { REDACTOR, TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
 import type {
   IRedactedException,
   IRedactedSpan,
@@ -46,9 +51,42 @@ export class TracesSource {
   constructor(
     private readonly connectors: TelemetryConnectorFactory,
     @Inject(REDACTOR) private readonly redactor: Redactor,
+    @Optional()
+    @Inject(TELEMETRY_SOURCE_INTERCEPTOR)
+    private readonly interceptor?: ITelemetrySourceInterceptor,
   ) {}
 
   async search(source: IConnectorSource, request: ITraceSearchQuery): Promise<ITraceSearchBatch> {
+    const call = {
+      operation: TelemetryOperation.TracesSearch,
+      source: source.url,
+      request: {
+        query: request.query,
+        start: request.start.toISOString(),
+        end: request.end.toISOString(),
+        limit: request.limit,
+        spansPerSpanSet: request.spansPerSpanSet,
+        component: request.component,
+      },
+    };
+
+    return intercept(this.interceptor, call, () => this.searchSource(source, request));
+  }
+
+  async trace(source: IConnectorSource, request: ITraceLookup): Promise<ITraceBatch> {
+    const call = {
+      operation: TelemetryOperation.TracesTrace,
+      source: source.url,
+      request: { traceId: request.traceId, component: request.component },
+    };
+
+    return intercept(this.interceptor, call, () => this.traceSource(source, request));
+  }
+
+  private async searchSource(
+    source: IConnectorSource,
+    request: ITraceSearchQuery,
+  ): Promise<ITraceSearchBatch> {
     const result = await withQuerySpan(
       TelemetryBackend.Tempo,
       TelemetrySignal.Traces,
@@ -99,7 +137,7 @@ export class TracesSource {
     return { traces, redaction };
   }
 
-  async trace(source: IConnectorSource, request: ITraceLookup): Promise<ITraceBatch> {
+  private async traceSource(source: IConnectorSource, request: ITraceLookup): Promise<ITraceBatch> {
     const found = await withQuerySpan(
       TelemetryBackend.Tempo,
       TelemetrySignal.Traces,

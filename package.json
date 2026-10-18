@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test \"**/dist/**/*.spec.js\"",
     "clean": "rm -rf dist libs/*/dist apps/*/dist",
-    "heimdall": "node apps/cli/dist/heimdall.js"
+    "heimdall": "node apps/cli/dist/heimdall.js",
+    "transcripts:record": "npm run build && node libs/investigation/dist/__fixtures__/transcripts/record-transcripts.js"
   },
   "devDependencies": {
     "@swc/cli": "^0.8.1",

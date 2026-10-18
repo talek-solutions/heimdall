@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { FieldSemantic, TelemetryBackend } from '@heimdall/config';
 import type { IConnectorSource } from '../connectors/connector-source.type';
 import type { LokiStream } from '../connectors/loki/api/loki.response';
@@ -12,7 +12,12 @@ import type { Redactor } from '../redaction/redactor';
 import type { ILogBatch, ILogRecord, ILogsRangeQuery } from './logs-source.interface';
 import { maskLineFilters, withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
-import { REDACTOR } from './telemetry-source.tokens';
+import {
+  intercept,
+  TelemetryOperation,
+  type ITelemetrySourceInterceptor,
+} from './telemetry-source.interceptor';
+import { REDACTOR, TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
 
 const NANOS_PER_MILLI = 1_000_000n;
 
@@ -26,9 +31,29 @@ export class LogsSource {
   constructor(
     private readonly connectors: TelemetryConnectorFactory,
     @Inject(REDACTOR) private readonly redactor: Redactor,
+    @Optional()
+    @Inject(TELEMETRY_SOURCE_INTERCEPTOR)
+    private readonly interceptor?: ITelemetrySourceInterceptor,
   ) {}
 
   async queryRange(source: IConnectorSource, request: ILogsRangeQuery): Promise<ILogBatch> {
+    const call = {
+      operation: TelemetryOperation.LogsQueryRange,
+      source: source.url,
+      request: {
+        query: request.query,
+        start: request.start.toISOString(),
+        end: request.end.toISOString(),
+        limit: request.limit,
+        fields: request.fields,
+        component: request.component,
+      },
+    };
+
+    return intercept(this.interceptor, call, () => this.read(source, request));
+  }
+
+  private async read(source: IConnectorSource, request: ILogsRangeQuery): Promise<ILogBatch> {
     const streams = await withQuerySpan(
       TelemetryBackend.Loki,
       TelemetrySignal.Logs,

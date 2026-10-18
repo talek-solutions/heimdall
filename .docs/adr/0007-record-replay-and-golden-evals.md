@@ -45,3 +45,39 @@ because it is trusted.
 
 **Cost:** a full judged run spends real money. Gate it behind an explicit command
 (`heimdall eval`) rather than every commit; deterministic replay tests carry CI.
+
+## Amendment (2026-10-18): what replay tells, and how it is built
+
+**Replay tells whether and where a change alters a run, not whether it made conclusions
+better.** The recorded model answered the old prompt and the old tool results, so replaying its
+answers can only show that what the model sees, or what the tools return, has changed, and
+where. Better or worse is the golden set's question. The two layers above stay; this sharpens
+what the first one is for.
+
+- **Every run is recorded.** `heimdall investigate` writes a transcript to `~/.heimdall/runs/`,
+  keeping the last 20, readable by the owner only. `--no-record` or `HEIMDALL_RECORD=off` opts
+  out. Recording sits at the ports, around the LLM provider and the redacting telemetry sources,
+  so a transcript holds only redacted telemetry (ADR 0008) and allowlisted variables, never a key
+  or a token.
+- **One session instead of two replay clients.** The `ReplayLlmClient` and
+  `ReplayTelemetrySource` of the decision are a single `TranscriptSession`. It sits behind
+  optional interceptor hooks of the real ports (`LLM_CALL_INTERCEPTOR`,
+  `TELEMETRY_SOURCE_INTERCEPTOR`), so neither port needs a second implementation.
+- **`heimdall replay <transcript>`** re-runs `investigate` in a child process. The child gets the
+  recorded variables, flags and manifest, since configuration is resolved at bootstrap. It pins
+  what came from outside the code: the clock, the resolved sources, an answer typed at a prompt.
+  The model and the sources are answered from the transcript. Replay fails on a changed tool
+  result, source call or report. A changed prompt or tool schema is reported, and fails only
+  under `--strict`. Divergence exits `6` (ADR 0006, amendment).
+- **CI replays transcripts recorded by the scripted model.** They can be re-recorded for free
+  with `npm run transcripts:record`. Real-model transcripts stay local.
+- **`heimdall eval`** runs each golden case (`libs/evals/golden/*.yaml`) as `heimdall investigate`
+  in its own process, so the fixture's bootstrap-once model holds (ADR 0014):
+  - **Checks:** code checks the outcome, origin and cause.
+  - **Judge:** an agent run whose only tool is a strict `score` tool scores component, mechanism
+    and evidence, 0 to 2 each with a reason.
+- **Calibration has a rule and a lock.** At least 5 hand-scored runs are needed. Every dimension
+  must agree exactly on 80% or more and never be off by 2. A passing lock counts only for the
+  judge model it was made with. Until one matches, every scorecard says **uncalibrated**.
+
+The rules are in [`.docs/design/replay-and-evals.md`](../design/replay-and-evals.md).

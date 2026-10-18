@@ -27,6 +27,12 @@ export { TracesSource } from './source/traces.source';
 export type * from './source/traces-source.interface';
 export { TelemetrySourceModule } from './source/telemetry-source.module';
 export { TelemetrySignal, TelemetrySpanName } from './source/telemetry-source.enums';
+export {
+  TelemetryOperation,
+  type ITelemetryCall,
+  type ITelemetrySourceInterceptor,
+} from './source/telemetry-source.interceptor';
+export { TELEMETRY_SOURCE_INTERCEPTOR } from './source/telemetry-source.tokens';
 export { TempoSpanKind, TempoStatusCode } from './connectors/tempo/tempo.enums';
 
 // Redaction: what the sources apply, and the shapes they report it in.

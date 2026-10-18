@@ -23,6 +23,7 @@ heimdall investigate "checkouts are not working" --env prod
 | `--json` | The report as one JSON object on stdout; the plan under `--plan-only` |
 | `--ndjson` | Each stage as one JSON event per line on stdout |
 | `--quiet` | No progress on stderr |
+| `--no-record` | Keep no transcript of this run ([replay-and-evals.md](../design/replay-and-evals.md)) |
 
 The manifest is read from `HEIMDALL_MANIFEST`, else `~/.heimdall/manifest.yaml`
 ([heimdall-manifest.md](heimdall-manifest.md)).
@@ -33,6 +34,9 @@ The manifest is read from `HEIMDALL_MANIFEST`, else `~/.heimdall/manifest.yaml`
 | `INVESTIGATION_LOOKBACK` | `60m` | Window when `--since` is not given |
 | `INVESTIGATION_HOP_BUDGET` | `1` | Hops beyond the path that neighbours and contention may reach; `0` disables both |
 | `INVESTIGATION_MAX_CHECKS` | `40` | Cap on checks; the plan reports how many it dropped |
+| `HEIMDALL_RECORD` | `on` | `off` keeps no transcripts, like `--no-record` on every run |
+| `HEIMDALL_RUNS_DIR` | `~/.heimdall/runs` | Where transcripts are kept |
+| `HEIMDALL_RUNS_KEEP` | `20` | Transcripts kept; the oldest go first |
 
 In fixture mode the window ends at the fixture anchor (ADR 0014).
 
@@ -176,8 +180,14 @@ The remaining `AGENT_*` limits (tool calls, tokens, concurrency) are in
 - the pruned vertices looked at, with their reasons
 - usage: turns, tool calls, queries, tokens, time
 - the trace id, when tracing is on
+- `transcript`: the path of this run's transcript, when one was recorded
 
 Text prints it after the plan.
+
+**Every run is recorded** to `~/.heimdall/runs/`, redacted. `heimdall replay <transcript>`
+replays a run with no model and no backend, and reports where today's code makes it differ. It
+exits `0` when the run matches and `6` when it diverged. Both are specified in
+[replay-and-evals.md](../design/replay-and-evals.md).
 
 | Outcome | Exit |
 |---|---|
@@ -213,6 +223,9 @@ picks one; the entry's method is then `prompt`. Without one, the command exits 2
 | `INVESTIGATION_CONCLUSION_INVALID` | the agent's conclusion was rejected twice | 1 |
 | `AGENT_BUDGET_EXCEEDED` | the run spent a budget before concluding ([ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md)) | 5 |
 | `AGENT_INVALID_CONFIG` | an `AGENT_*` variable cannot be used. Checked at startup | 2 |
+| `TRANSCRIPT_INVALID_CONFIG` | `HEIMDALL_RECORD` or `HEIMDALL_RUNS_KEEP` cannot be used. Checked at startup | 2 |
+| `TRANSCRIPT_NOT_FOUND`, `TRANSCRIPT_INVALID` | `replay` was given no readable transcript | 2 |
+| `TRANSCRIPT_REPLAY_FAILED` | the replayed run wrote no transcript of its own | 1 |
 
 These are returned to the agent as tool results, not raised:
 - `INVESTIGATION_UNKNOWN_CHECK`

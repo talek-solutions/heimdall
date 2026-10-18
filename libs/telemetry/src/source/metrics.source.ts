@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { TelemetryBackend } from '@heimdall/config';
 import type { IConnectorSource } from '../connectors/connector-source.type';
 import { PrometheusResultType } from '../connectors/prometheus/prometheus.enums';
@@ -6,6 +6,12 @@ import { TelemetryConnectorFactory } from '../connectors/telemetry-connector.fac
 import type { IMetricSeriesData, IMetricsRangeQuery } from './metrics-source.interface';
 import { withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
+import {
+  intercept,
+  TelemetryOperation,
+  type ITelemetrySourceInterceptor,
+} from './telemetry-source.interceptor';
+import { TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
 
 /**
  * Metric series for the engine: typed points and allowlisted labels, never the connector's raw
@@ -13,9 +19,33 @@ import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enum
  */
 @Injectable()
 export class MetricsSource {
-  constructor(private readonly connectors: TelemetryConnectorFactory) {}
+  constructor(
+    private readonly connectors: TelemetryConnectorFactory,
+    @Optional()
+    @Inject(TELEMETRY_SOURCE_INTERCEPTOR)
+    private readonly interceptor?: ITelemetrySourceInterceptor,
+  ) {}
 
   async queryRange(
+    source: IConnectorSource,
+    request: IMetricsRangeQuery,
+  ): Promise<IMetricSeriesData[]> {
+    const call = {
+      operation: TelemetryOperation.MetricsQueryRange,
+      source: source.url,
+      request: {
+        query: request.query,
+        start: request.start.toISOString(),
+        end: request.end.toISOString(),
+        stepSeconds: request.stepSeconds,
+        labels: request.labels,
+      },
+    };
+
+    return intercept(this.interceptor, call, () => this.read(source, request));
+  }
+
+  private async read(
     source: IConnectorSource,
     request: IMetricsRangeQuery,
   ): Promise<IMetricSeriesData[]> {

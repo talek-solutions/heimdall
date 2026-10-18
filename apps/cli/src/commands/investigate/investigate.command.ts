@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Inject } from '@nestjs/common';
 import { Command, Option } from 'nest-commander';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
@@ -10,12 +11,20 @@ import {
   type IEntryCandidate,
   type IInvestigationEvent,
 } from '@heimdall/investigation';
+import { TELEMETRY_DATASOURCE_CONFIG, type ITelemetryDatasourceConfig } from '@heimdall/telemetry';
+import {
+  TranscriptMode,
+  TranscriptPin,
+  TranscriptSession,
+  type ITranscriptOutcome,
+} from '@heimdall/transcript';
 import { CliConfigService } from '../../config/cli-config.service';
 import type { CliConfig, CliFlags } from '../../config/cli-config.model';
-import { exitCodeForOutcome } from '../../errors/error-exit.mapper';
+import { exitCodeForOutcome, toErrorResponse } from '../../errors/error-exit.mapper';
 import { describeProgress, renderPlan } from '../../presentation/investigation-plan.renderer';
 import { renderReport } from '../../presentation/investigation-report.renderer';
 import { Streams } from '../../presentation/streams';
+import { version } from '../../version';
 import { HeimdallCommand } from '../heimdall.command';
 
 interface InvestigateCommandFlags extends CliFlags {
@@ -23,6 +32,8 @@ interface InvestigateCommandFlags extends CliFlags {
   readonly since?: string;
   readonly entry?: string;
   readonly planOnly?: boolean;
+  /** commander sets this to false for `--no-record`. */
+  readonly record?: boolean;
 }
 
 const PROGRESS_LEVELS: ReadonlySet<LogLevel> = new Set([LogLevel.Info, LogLevel.Debug]);
@@ -47,6 +58,8 @@ export class InvestigateCommand extends HeimdallCommand {
     @Inject(HEIMDALL_MANIFEST_PATH) private readonly manifestPath: string,
     private readonly investigations: InvestigationInitService,
     private readonly executions: InvestigationExecutionService,
+    private readonly transcripts: TranscriptSession,
+    @Inject(TELEMETRY_DATASOURCE_CONFIG) private readonly datasources: ITelemetryDatasourceConfig,
   ) {
     super(streams);
   }
@@ -80,6 +93,14 @@ export class InvestigateCommand extends HeimdallCommand {
     return true;
   }
 
+  @Option({
+    flags: '--no-record',
+    description: 'Keep no transcript of this run in ~/.heimdall/runs (ADR 0007)',
+  })
+  parseRecord(): boolean {
+    return false;
+  }
+
   @Option({ flags: '--json', description: 'Emit the plan as one JSON object' })
   parseJson(): boolean {
     return true;
@@ -99,8 +120,26 @@ export class InvestigateCommand extends HeimdallCommand {
     const flags = options as InvestigateCommandFlags;
     const cli = this.configService.resolve(flags);
     const manifest = await this.reader.load(this.manifestPath);
+    const query = passedParams.join(' ');
     const planOnly = flags.planOnly === true;
-    const onEvent = (event: IInvestigationEvent): void => this.report(event, cli);
+    const onEvent = (event: IInvestigationEvent): void => {
+      // The report is kept once, as the outcome.
+      if (event.type !== InvestigationEventType.Concluded) {
+        this.transcripts.event(event);
+      }
+      this.report(event, cli);
+    };
+
+    if (flags.record === false) {
+      this.transcripts.disable();
+    }
+    this.transcripts.begin({
+      heimdall: version,
+      command: { query, environment: flags.env, since: flags.since, entry: flags.entry, planOnly },
+      manifest: readFileSync(this.manifestPath, 'utf8'),
+      datasources: this.datasources,
+      env: process.env,
+    });
 
     // The root of the run's trace: init, the agent and every query nest under it (ADR 0017).
     await tracer.startActiveSpan(
@@ -110,36 +149,41 @@ export class InvestigateCommand extends HeimdallCommand {
         try {
           const plan = await this.investigations.prepare(
             manifest,
-            {
-              query: passedParams.join(' '),
-              environment: flags.env,
-              since: flags.since,
-              entry: flags.entry,
-            },
+            { query, environment: flags.env, since: flags.since, entry: flags.entry },
             {
               onEvent,
               // Never prompt without a terminal on stdin (ADR 0006): ambiguity then exits 2.
-              chooseEntry: this.streams.canPrompt()
-                ? (candidates) => this.choose(candidates)
-                : undefined,
+              // A replay answers with the choice the recorded run made.
+              chooseEntry:
+                this.streams.canPrompt() || this.transcripts.hasPin(TranscriptPin.EntryChoice)
+                  ? (candidates) =>
+                      this.transcripts.pinAsync(TranscriptPin.EntryChoice, () =>
+                        this.choose(candidates),
+                      )
+                  : undefined,
             },
           );
 
           if (planOnly) {
+            this.save({ plan }, cli);
             if (cli.outputFormat === OutputFormat.Json) {
               this.streams.write(`${JSON.stringify(plan)}\n`);
             }
             return;
           }
           const report = await this.executions.execute(manifest, plan, { onEvent });
+          const transcript = this.save({ report }, cli);
 
           span.setAttribute(InvestigationSpanAttribute.Outcome, report.outcome);
           if (cli.outputFormat === OutputFormat.Json) {
-            this.streams.write(`${JSON.stringify(report)}\n`);
+            this.streams.write(
+              `${JSON.stringify(transcript === undefined ? report : { ...report, transcript })}\n`,
+            );
           }
           // 0 for a cause, 3 for no signal or no conclusion: a real outcome, not a failure.
           process.exitCode = exitCodeForOutcome(report.outcome);
         } catch (error) {
+          this.save({ error: toErrorResponse(error) }, cli);
           span.setStatus({ code: SpanStatusCode.ERROR });
           throw error;
         } finally {
@@ -147,6 +191,22 @@ export class InvestigateCommand extends HeimdallCommand {
         }
       },
     );
+  }
+
+  /** Keeps the transcript; failing to write one is a warning, never a failed run (ADR 0007). */
+  private save(outcome: Omit<ITranscriptOutcome, 'events'>, cli: CliConfig): string | undefined {
+    const saved = this.transcripts.finish(outcome);
+
+    if (saved.warning !== undefined) {
+      this.streams.writeDiagnostic(`heimdall: ${saved.warning}\n`);
+    } else if (
+      saved.path !== undefined &&
+      this.transcripts.mode === TranscriptMode.Record &&
+      PROGRESS_LEVELS.has(cli.logLevel)
+    ) {
+      this.streams.writeDiagnostic(`heimdall: transcript ${saved.path}\n`);
+    }
+    return this.transcripts.mode === TranscriptMode.Record ? saved.path : undefined;
   }
 
   private report(event: IInvestigationEvent, cli: CliConfig): void {
