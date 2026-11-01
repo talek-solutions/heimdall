@@ -4,6 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { parse, stringify } from 'yaml';
 import type { IEvalsConfig } from '../config/evals-config.model';
 import { EvalError, EvalErrorCode } from '../errors';
+import { PRIVATE_FILE_MODE } from '../evals.constants';
 import { CalibrationStatus, JudgeDimension } from '../evals.enums';
 import { EVALS_CONFIG } from '../evals.tokens';
 import { Judge, type IJudgeInput, type IJudgeScores } from '../score/judge';
@@ -112,6 +113,7 @@ export class Calibrator {
     writeFileSync(
       file,
       `# Hand-score this run: 0, 1 or 2 per dimension (rubric: .docs/design/replay-and-evals.md).\n# Then move it to libs/evals/calibration/ and run heimdall eval --calibrate.\n${stringify(sheet)}`,
+      { mode: PRIVATE_FILE_MODE },
     );
     return file;
   }

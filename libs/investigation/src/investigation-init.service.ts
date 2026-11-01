@@ -11,6 +11,7 @@ import type { IInvestigationConfig } from './config/investigation-config.model';
 import { EntryMethod, InvestigationEventType, SymptomMethod } from './enums';
 import { AmbiguousEntryError, InvestigationError, InvestigationErrorCode } from './errors';
 import type {
+  IEntryCandidate,
   IInvestigationEntry,
   IInvestigationEvent,
   IInvestigationPlan,
@@ -25,6 +26,8 @@ import { INVESTIGATION_CONFIG } from './investigation.tokens';
 import { LOCATABLE_TYPES, SymptomTriage, type ITriageResult } from './triage/symptom.triage';
 
 const ALL_ROLES: readonly IndicatorRole[] = Object.values(IndicatorRole);
+/** 0.6 - 0.45 is 0.1499… in floating point; a gap of exactly the margin is not close. */
+const CONFIDENCE_TOLERANCE = 1e-9;
 const tracer = trace.getTracer('@heimdall/investigation');
 
 enum InitSpanAttribute {
@@ -143,15 +146,16 @@ export class InvestigationInitService {
       method: SymptomMethod.Model,
     };
 
-    return { symptom, entry: await this.choose(graph, result, options) };
+    return { symptom, entry: await this.choose(graph, result, symptom.roles, options) };
   }
 
   private async choose(
     graph: SystemGraph,
     { candidates }: ITriageResult,
+    roles: readonly IndicatorRole[],
     options: IPrepareOptions,
   ): Promise<IInvestigationEntry> {
-    const [top, runnerUp] = candidates;
+    const [top, ...others] = candidates;
 
     if (top === undefined) {
       throw new InvestigationError(
@@ -160,9 +164,11 @@ export class InvestigationInitService {
       );
     }
     const { minConfidence, ambiguityMargin } = this.config.triage;
+    const close = others.filter(
+      ({ confidence }) => top.confidence - confidence < ambiguityMargin - CONFIDENCE_TOLERANCE,
+    );
     const ambiguous =
-      top.confidence < minConfidence ||
-      (runnerUp !== undefined && top.confidence - runnerUp.confidence < ambiguityMargin);
+      top.confidence < minConfidence || this.hasRival(graph, top, close, roles);
 
     if (!ambiguous) {
       return this.entry(this.vertex(graph, top.vertex), EntryMethod.Model, candidates);
@@ -174,6 +180,34 @@ export class InvestigationInitService {
       throw new AmbiguousEntryError(candidates);
     }
     return this.entry(this.vertex(graph, candidate.vertex), EntryMethod.Prompt, candidates);
+  }
+
+  /**
+   * A close candidate whose scope lies within the top one's is the same investigation seen
+   * closer up, so only one that reaches beyond it makes the choice ambiguous (ADR 0016).
+   */
+  private hasRival(
+    graph: SystemGraph,
+    top: IEntryCandidate,
+    close: readonly IEntryCandidate[],
+    roles: readonly IndicatorRole[],
+  ): boolean {
+    if (close.length === 0) {
+      return false;
+    }
+    const covered = new Set(this.scopedVertices(graph, top.vertex, roles));
+
+    return close.some(({ vertex }) =>
+      this.scopedVertices(graph, vertex, roles).some((scoped) => !covered.has(scoped)),
+    );
+  }
+
+  private scopedVertices(
+    graph: SystemGraph,
+    entry: string,
+    roles: readonly IndicatorRole[],
+  ): string[] {
+    return this.scopes.resolve(graph, entry, roles).vertices.map(({ vertex }) => vertex);
   }
 
   private named(

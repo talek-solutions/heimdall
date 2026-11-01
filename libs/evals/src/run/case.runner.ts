@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import { Injectable } from '@nestjs/common';
 import type { ErrorResponse } from '@heimdall/core';
 import { ManifestEnvVariable } from '@heimdall/core/manifest';
 import type { IInvestigationReport } from '@heimdall/investigation';
 import { TelemetryEnvVariable } from '@heimdall/telemetry';
-import { isRecordedVariable } from '@heimdall/transcript';
+import { isRecordedVariable, TranscriptEnvVariable } from '@heimdall/transcript';
 import type { IGoldenCase } from '../cases/golden-case.interface';
 import { EvalErrorCode } from '../errors';
 import { EvalRunStatus } from '../evals.enums';
@@ -16,6 +18,8 @@ export interface ICaseRun {
   readonly exitCode: number;
   readonly report?: IReportWithTranscript | undefined;
   readonly error?: ErrorResponse | undefined;
+  /** The transcript the run wrote, whether it completed or failed. */
+  readonly transcript?: string | undefined;
 }
 
 export interface ISpawned {
@@ -31,11 +35,12 @@ const STDERR_TAIL = 2_000;
 /**
  * Runs one golden case as an engineer would: `heimdall investigate --json` in its own process,
  * with the case's fixture scenario, so the fixture's bootstrap-once model holds (ADR 0014). The
- * run is recorded like any other (ADR 0007).
+ * run is recorded like any other (ADR 0007), but in a runs directory of its own, so its
+ * transcript is found even when it fails, and the developer's own runs are not evicted.
  */
 @Injectable()
 export class CaseRunner {
-  run(golden: IGoldenCase, spawn: Spawn): ICaseRun {
+  run(golden: IGoldenCase, spawn: Spawn, runsDir: string): ICaseRun {
     const child = spawn(
       [
         'investigate',
@@ -59,19 +64,28 @@ export class CaseRunner {
         [TelemetryEnvVariable.FixtureScenario]: golden.scenario,
         [TelemetryEnvVariable.FixtureAnchor]: golden.anchor,
         ...golden.env,
+        [TranscriptEnvVariable.RunsDir]: runsDir,
       },
     );
     const exitCode = child.status ?? -1;
     const output = parsed(child.stdout);
 
     if (output !== undefined && typeof output['errorCode'] === 'string') {
-      return { status: EvalRunStatus.Failed, exitCode, error: output as unknown as ErrorResponse };
+      return {
+        status: EvalRunStatus.Failed,
+        exitCode,
+        error: output as unknown as ErrorResponse,
+        transcript: recordedIn(runsDir),
+      };
     }
     if (output !== undefined && typeof output['outcome'] === 'string') {
+      const report = output as unknown as IReportWithTranscript;
+
       return {
         status: EvalRunStatus.Completed,
         exitCode,
-        report: output as unknown as IReportWithTranscript,
+        report,
+        transcript: report.transcript ?? recordedIn(runsDir),
       };
     }
     return {
@@ -81,6 +95,7 @@ export class CaseRunner {
         errorCode: EvalErrorCode.RunFailed,
         message: `investigate wrote no report (exit ${exitCode}): ${child.stderr.slice(-STDERR_TAIL).trim()}`,
       },
+      transcript: recordedIn(runsDir),
     };
   }
 }
@@ -96,6 +111,19 @@ export function spawnCli(entry: string, cwd: string): Spawn {
     });
     return { status, stdout: stdout ?? '', stderr: stderr ?? '' };
   };
+}
+
+/** The newest transcript in a run's own directory; its file names sort by recording time. */
+function recordedIn(runsDir: string): string | undefined {
+  if (!existsSync(runsDir)) {
+    return undefined;
+  }
+  const newest = readdirSync(runsDir)
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .at(-1);
+
+  return newest === undefined ? undefined : path.join(runsDir, newest);
 }
 
 function parsed(stdout: string): Record<string, unknown> | undefined {

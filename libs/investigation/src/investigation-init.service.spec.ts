@@ -26,6 +26,18 @@ const CHECKOUT = {
   reason: 'placing an order',
 };
 const PLACE_ORDER = { vertexId: 'flow:place-order', confidence: 0.55, reason: 'the order flow' };
+const CHECKOUT_SERVICE = {
+  vertexId: 'component:checkout',
+  confidence: 0.3,
+  reason: 'the checkout service',
+};
+/** Neither one's scope covers the other's: real rivals. */
+const PAYMENTS = { vertexId: 'component:payments', confidence: 0.6, reason: 'charging the card' };
+const INVENTORY = {
+  vertexId: 'component:inventory',
+  confidence: 0.55,
+  reason: 'reserving stock',
+};
 
 async function createService(llm: FakeLlmProvider): Promise<InvestigationInitService> {
   const moduleRef = await Test.createTestingModule({ imports: [InvestigationModule] })
@@ -125,9 +137,8 @@ describe('InvestigationInitService', () => {
   });
 
   it('reports close candidates as ambiguous when nobody can choose', async () => {
-    const close = { ...CHECKOUT, confidence: 0.6 };
     const llm = new FakeLlmProvider([
-      selectEntryCall({ candidates: [close, PLACE_ORDER], symptomRoles: [] }),
+      selectEntryCall({ candidates: [PAYMENTS, INVENTORY], symptomRoles: [] }),
     ]);
 
     await assert.rejects(
@@ -141,9 +152,8 @@ describe('InvestigationInitService', () => {
   });
 
   it('lets the caller choose among ambiguous candidates, keeping the classified symptom', async () => {
-    const close = { ...CHECKOUT, confidence: 0.6 };
     const llm = new FakeLlmProvider([
-      selectEntryCall({ candidates: [close, PLACE_ORDER], symptomRoles: ['latency'] }),
+      selectEntryCall({ candidates: [PAYMENTS, INVENTORY], symptomRoles: ['latency'] }),
     ]);
     const offered: string[] = [];
 
@@ -155,14 +165,80 @@ describe('InvestigationInitService', () => {
       {
         chooseEntry: async (candidates) => {
           offered.push(...candidates.map((candidate) => candidate.vertex));
-          return 'flow:place-order';
+          return 'component:inventory';
         },
       },
     );
 
-    assert.deepEqual(offered, ['functionality:checkout', 'flow:place-order']);
-    assert.equal(plan.entry.vertex, 'flow:place-order');
+    assert.deepEqual(offered, ['component:payments', 'component:inventory']);
+    assert.equal(plan.entry.vertex, 'component:inventory');
     assert.equal(plan.entry.method, EntryMethod.Prompt);
     assert.deepEqual(plan.symptom.roles, [IndicatorRole.Latency]);
+  });
+
+  it('takes the top candidate when the close ones lie within its scope', async () => {
+    const top = { ...CHECKOUT, confidence: 0.6 };
+    const close = { ...PLACE_ORDER, confidence: 0.5 };
+    const llm = new FakeLlmProvider([
+      selectEntryCall({ candidates: [top, close, CHECKOUT_SERVICE], symptomRoles: [] }),
+    ]);
+
+    const plan = await (await createService(llm)).prepare(manifest, { query: 'checkout' });
+
+    assert.equal(plan.entry.vertex, 'functionality:checkout');
+    assert.equal(plan.entry.method, EntryMethod.Model);
+    assert.equal(plan.entry.confidence, 0.6);
+    assert.equal(plan.entry.candidates.length, 3);
+  });
+
+  it('keeps the model pick between two candidates with the same scope', async () => {
+    const top = { ...PLACE_ORDER, confidence: 0.6 };
+    const close = { ...CHECKOUT, confidence: 0.5 };
+    const llm = new FakeLlmProvider([
+      selectEntryCall({ candidates: [top, close], symptomRoles: [] }),
+    ]);
+
+    const plan = await (await createService(llm)).prepare(manifest, { query: 'checkout' });
+
+    assert.equal(plan.entry.vertex, 'flow:place-order');
+    assert.equal(plan.entry.method, EntryMethod.Model);
+  });
+
+  it('stays ambiguous when a close candidate reaches beyond the top one', async () => {
+    const top = { ...CHECKOUT_SERVICE, confidence: 0.6 };
+    const close = { ...CHECKOUT, confidence: 0.5 };
+    const llm = new FakeLlmProvider([
+      selectEntryCall({ candidates: [top, close], symptomRoles: [] }),
+    ]);
+
+    await assert.rejects(
+      (await createService(llm)).prepare(manifest, { query: 'checkout' }),
+      (error) => error instanceof AmbiguousEntryError && error.candidates.length === 2,
+    );
+  });
+
+  it('does not count a runner-up exactly the margin away as close', async () => {
+    const apart = { ...INVENTORY, confidence: 0.45 };
+    const llm = new FakeLlmProvider([
+      selectEntryCall({ candidates: [PAYMENTS, apart], symptomRoles: [] }),
+    ]);
+
+    const plan = await (await createService(llm)).prepare(manifest, { query: 'payments' });
+
+    assert.equal(plan.entry.vertex, 'component:payments');
+    assert.equal(plan.entry.method, EntryMethod.Model);
+  });
+
+  it('stays ambiguous under the minimum confidence, however the others nest', async () => {
+    const top = { ...CHECKOUT, confidence: 0.45 };
+    const close = { ...PLACE_ORDER, confidence: 0.4 };
+    const llm = new FakeLlmProvider([
+      selectEntryCall({ candidates: [top, close], symptomRoles: [] }),
+    ]);
+
+    await assert.rejects(
+      (await createService(llm)).prepare(manifest, { query: 'checkout' }),
+      (error) => error instanceof AmbiguousEntryError,
+    );
   });
 });

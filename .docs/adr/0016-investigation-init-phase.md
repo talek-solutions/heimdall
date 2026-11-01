@@ -157,3 +157,32 @@ point rather than a fixed script.
 The Consequences claim that "one model call per investigation start is cheap next to the
 execution loop" still holds for the init phase; the execution loop's cost is bounded by the
 budgets of ADR 0017.
+
+## Amendment (2026-10-31): nested candidates are not rivals
+
+The first golden runs with a real model (ADR 0007) failed in triage on "checkouts are not
+working": `functionality:checkout` 0.60, `flow:place-order` 0.50, `component:checkout` 0.30. The
+runner-up was within the margin, so the entry was ambiguous, and `heimdall eval`, which has no
+terminal, exited 2. Yet the three are one part of the system seen at different depths: the
+functionality and its only flow resolve to the same scope, and the component's scope lies within
+it. The prompt asks for a lower confidence when a report could mean several parts, so the model
+spreads it across exactly such candidates.
+
+Ambiguity now compares the top candidate only with close candidates that reach beyond it: a
+runner-up within the margin is a rival only if its scope holds a vertex the top candidate's scope
+does not. Investigating the top candidate then loses nothing a covered runner-up would have
+looked at. The minimum confidence is unchanged. The margin is compared with a tolerance of
+1e-9: the same runs scored 0.60 against 0.45, and `0.6 - 0.45` is `0.1499…` in floating point,
+which read as within a 0.15 margin.
+
+- **The model's pick stands.** When the top candidate is the narrower one and a close runner-up
+  reaches further, the entry stays ambiguous rather than widening to the runner-up.
+- **Scopes, not edges.** Comparing resolved scopes answers "is anything lost?" directly, including
+  a component on a flow, which the containment edges do not express. It costs at most two extra
+  scope resolutions, in memory, and only when a runner-up is close.
+- **Known limit.** Covered scope does not mean covered checks: the check cap can omit a check the
+  runner-up's own plan would have kept.
+
+Rejected: rewording the prompt (model-dependent, and it changes the cached prefix), pinning
+`entry` in the golden cases (triage would go untested), and widening the margin (it would hide
+real rivals too).

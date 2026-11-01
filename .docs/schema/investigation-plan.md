@@ -198,7 +198,10 @@ exits `0` when the run matches and `6` when it diverged. Both are specified in
 ## Ambiguity
 
 When the model's best candidate is under 0.5 confidence, or a runner-up is within 0.15 of it, the
-entry is ambiguous. With a terminal on stdin the candidates are listed on stderr and the engineer
+entry is ambiguous; a runner-up exactly 0.15 below is not within it, whatever floating point
+makes of the difference. A runner-up whose scope lies within the best candidate's does not count: it
+is the same investigation seen closer up, as `flow:place-order` is for `functionality:checkout`
+([ADR 0016, amendment](../adr/0016-investigation-init-phase.md)). With a terminal on stdin the candidates are listed on stderr and the engineer
 picks one; the entry's method is then `prompt`. Without one, the command exits 2 with
 `INVESTIGATION_ENTRY_AMBIGUOUS`, naming the candidates and `--entry`.
 

@@ -178,14 +178,21 @@ and the field.
 - **How a case runs.** It runs as `heimdall investigate --json` in a process of its own, from the
   current working directory, so `.env` and `ANTHROPIC_API_KEY` apply. Its fixture scenario and
   anchor are set, and the developer's own `INVESTIGATION_*` and `AGENT_*` are left out, so cases
-  stay comparable. Each run is recorded like any other, and its transcript path is in the
-  scorecard for `heimdall replay`.
+  stay comparable. Each run is recorded like any other, but in a runs directory of its own,
+  `<output>/runs/<case>-<n>/` through `HEIMDALL_RUNS_DIR`: its transcript is found even when the
+  run fails, and eval runs never evict the developer's own from `~/.heimdall/runs`. The
+  transcript path is in the scorecard for `heimdall replay`.
 - **What is checked.** Code checks the outcome, the origin step and the cause vertex: `pass`,
   `fail`, or `n/a` where the reference has no answer. Then the judge scores the run. A run that
   ended in an error fails its checks, and the judge is not asked.
 - **Where it goes.** The scorecard is written to `EVAL_OUTPUT_DIR`, by default
-  `~/.heimdall/evals/<time>/scorecard.json`, alongside one blank scoring sheet per run. Text prints
-  a row per run, the means, the tokens spent, and whether the judge is calibrated.
+  `~/.heimdall/evals/<time>/scorecard.json`, alongside one blank scoring sheet per run. Like the
+  runs directory, `<time>/` and its folders are 0700 and its files 0600: the sheets hold what the
+  judge was shown. Text prints a row per run, the means, the tokens spent, and whether the judge
+  is calibrated.
+- **What a run spent.** `tokens.investigation` is every model call the run's transcript recorded,
+  triage included, whether the run completed or failed. Without a readable transcript only the
+  agent's usage from the report is known. `tokens.judge` is the judge's own call.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -245,5 +252,5 @@ which is worse than no eval (ADR 0007).
 | `libs/evals/src/score/checks.spec.ts` | Outcome, origin and cause: exact matches pass, `n/a` without a reference answer, a failed run fails |
 | `libs/evals/src/score/judge.spec.ts` | One strict `score` tool, the rubric prompt and model, a score outside 0 to 2 sent back and the judge failing within its budget, only cited results shown |
 | `libs/evals/src/calibration/calibrator.spec.ts` | The 80% and off-by-2 rules, at least 5 scored sheets with blanks ignored, the lock and its judge model |
-| `libs/evals/src/eval.service.spec.ts` | A case runs as `investigate --json` with its fixture, is checked, judged and given a blank sheet; a failed run is not judged |
+| `libs/evals/src/eval.service.spec.ts` | A case runs as `investigate --json` with its fixture, is checked, judged and given a blank sheet; a failed run is not judged; each run records into its own runs directory, its tokens count every recorded model call, triage included, also for a failed run; the scorecard and sheets are owner-only |
 | `apps/cli/src/commands/eval/eval.e2e.spec.ts` | Without tokens: a failed run in the scorecard, an unknown case and `--repeat 0` exit 2, calibration without sheets exits 2 |

@@ -80,8 +80,8 @@ function row(run: IEvalRun): string {
     ...CHECKS.map((name) => run.checks[name]),
     ...DIMENSIONS.map((name) => (run.scores === null ? '–' : String(run.scores[name].score))),
   ];
-  const tokens = run.tokens.agent.inputTokens + run.tokens.judge.inputTokens;
-  const output = run.tokens.agent.outputTokens + run.tokens.judge.outputTokens;
+  const tokens = run.tokens.investigation.inputTokens + run.tokens.judge.inputTokens;
+  const output = run.tokens.investigation.outputTokens + run.tokens.judge.outputTokens;
 
   return [
     `${run.case} #${run.repeat}`.padEnd(CASE_WIDTH),

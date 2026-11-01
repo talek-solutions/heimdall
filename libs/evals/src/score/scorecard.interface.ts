@@ -25,7 +25,8 @@ export interface IEvalRun {
   readonly judgeError: ErrorResponse | null;
   /** The scoring sheet written for this run, to hand-score for calibration. */
   readonly sheet: string | null;
-  readonly tokens: { readonly agent: ITokens; readonly judge: ITokens };
+  /** `investigation` is every model call the run made, triage included. */
+  readonly tokens: { readonly investigation: ITokens; readonly judge: ITokens };
 }
 
 /** One `heimdall eval`: every run, and whether its judge can be trusted. */
