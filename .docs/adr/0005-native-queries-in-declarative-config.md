@@ -1,6 +1,6 @@
 # 0005. Telemetry config carries native queries
 
-- **Status:** Accepted
+- **Status:** Superseded by [0015](0015-system-manifest-as-a-traversable-graph.md)
 - **Date:** 2026-09-12
 
 ## Context

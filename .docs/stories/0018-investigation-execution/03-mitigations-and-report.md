@@ -15,10 +15,10 @@ later.
 
 | # | It can… | Status |
 |---|---|---|
-| 1 | Propose mitigations in three tiers (immediate or manual, short-term, prevention), each with trade-offs | planned |
+| 1 | Propose mitigations in three tiers (immediate or manual, short-term, prevention), each with trade-offs | in progress: each mitigation carries a tier and a non-empty trade-off; a single tier still passes the validator |
 | 2 | Report the impact tier: what else is hurt, never presented as a cause | planned |
-| 3 | Render the report as text, as `--json`, and as the final `--ndjson` event | planned |
-| 4 | Link the report to the run's trace id and list the blind spots the conclusion rests on | planned |
+| 3 | Render the report as text, as `--json`, and as the final `--ndjson` event | in progress: `--json` and the `concluded` event are covered by specs; the text renderer has no spec |
+| 4 | Link the report to the run's trace id and list the blind spots the conclusion rests on | in progress: the report carries the trace id; blind spots are in its plan but not rendered |
 | 5 | Specify the report in `.docs/schema/investigation-report.md` | planned |
 
 ## Acceptance

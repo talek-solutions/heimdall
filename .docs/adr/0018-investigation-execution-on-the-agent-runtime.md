@@ -1,6 +1,6 @@
 # 0018. Investigation execution on the agent runtime
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-16
 
 ## Context

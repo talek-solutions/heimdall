@@ -33,7 +33,7 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0002](0002-read-only-blast-radius.md) | Blast radius: read-only with a mutation seam | Accepted |
 | [0003](0003-node-24-runtime.md) | Runtime: pinned Node 24 | Accepted |
 | [0004](0004-single-llm-adapter-behind-a-port.md) | LLM port with a single Anthropic adapter | Accepted |
-| [0005](0005-native-queries-in-declarative-config.md) | Telemetry config carries native queries | Accepted |
+| [0005](0005-native-queries-in-declarative-config.md) | Telemetry config carries native queries | Superseded by 0015 |
 | [0006](0006-cli-output-contract.md) | CLI output contract | Accepted |
 | [0007](0007-record-replay-and-golden-evals.md) | Eval strategy: replay + judged golden set | Accepted |
 | [0008](0008-egress-allowlist-and-scrub.md) | Egress: allowlist plus scrubbing | Accepted |
@@ -43,7 +43,7 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0012](0012-no-eslint-until-typescript-eslint-supports-ts7.md) | Stream discipline enforced by a guard test | Accepted |
 | [0013](0013-user-level-kubeconfig-style-config.md) | User-level, kubeconfig-style configuration | Accepted |
 | [0014](0014-fixture-datasources.md) | Fixture datasources behind the connectors' fetch | Accepted |
-| [0015](0015-system-manifest-as-a-traversable-graph.md) | System manifest as a traversable graph | Proposed |
-| [0016](0016-investigation-init-phase.md) | Investigation init phase: model-classified entry, deterministic scope and plan | Proposed |
-| [0017](0017-agent-runtime-loop-tools-budgets-tracing.md) | Agent runtime: loop, tools, budgets and tracing | Proposed |
-| [0018](0018-investigation-execution-on-the-agent-runtime.md) | Investigation execution on the agent runtime | Proposed |
+| [0015](0015-system-manifest-as-a-traversable-graph.md) | System manifest as a traversable graph | Accepted |
+| [0016](0016-investigation-init-phase.md) | Investigation init phase: model-classified entry, deterministic scope and plan | Accepted |
+| [0017](0017-agent-runtime-loop-tools-budgets-tracing.md) | Agent runtime: loop, tools, budgets and tracing | Accepted |
+| [0018](0018-investigation-execution-on-the-agent-runtime.md) | Investigation execution on the agent runtime | Accepted |

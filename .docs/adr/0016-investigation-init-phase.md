@@ -1,6 +1,6 @@
 # 0016. Investigation init phase: model-classified entry, deterministic scope and plan
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-27
 
 ## Context

@@ -1,6 +1,6 @@
 # 0017. Agent runtime: loop, tools, budgets and tracing
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-16
 
 ## Context

@@ -1,6 +1,6 @@
 # 0015. System manifest as a traversable graph
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-27
 
 ## Context
