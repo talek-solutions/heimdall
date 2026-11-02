@@ -47,3 +47,4 @@ What this makes easy. What this makes hard. What we will regret if assumptions c
 | [0016](0016-investigation-init-phase.md) | Investigation init phase: model-classified entry, deterministic scope and plan | Accepted |
 | [0017](0017-agent-runtime-loop-tools-budgets-tracing.md) | Agent runtime: loop, tools, budgets and tracing | Accepted |
 | [0018](0018-investigation-execution-on-the-agent-runtime.md) | Investigation execution on the agent runtime | Accepted |
+| [0019](0019-published-schemas-for-transcripts-and-scorecards.md) | Published schemas for transcripts and scorecards | Accepted |
