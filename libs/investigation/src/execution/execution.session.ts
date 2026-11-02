@@ -1,6 +1,7 @@
 import type { SystemGraph } from '@heimdall/core/graph';
 import type { ICheck, IInvestigationPlan } from '../interfaces';
 import type { ICheckResult } from './checks/check-result.interface';
+import type { IProfile } from './health/profile.summariser';
 import type { IExecutionSources } from './sources/telemetry-sources.resolver';
 
 export interface IReachedPruned {
@@ -23,6 +24,7 @@ export class ExecutionSession {
   rejections = 0;
   private readonly results = new Map<string, ICheckResult>();
   private readonly dropped = new Map<string, Set<string>>();
+  private readonly profileByResult = new Map<string, IProfile>();
   private next = 1;
 
   constructor(
@@ -59,12 +61,21 @@ export class ExecutionSession {
     this.dropped.set(subject, names);
   }
 
+  /** Kept out of the result for the same reason: the report shows profiles, the agent does not. */
+  noteProfile(result: string, profile: IProfile): void {
+    this.profileByResult.set(result, profile);
+  }
+
   result(id: string): ICheckResult | undefined {
     return this.results.get(id);
   }
 
   get all(): ICheckResult[] {
     return [...this.results.values()];
+  }
+
+  get profiles(): Readonly<Record<string, IProfile>> {
+    return Object.fromEntries(this.profileByResult);
   }
 
   get droppedFields(): IDroppedFields[] {

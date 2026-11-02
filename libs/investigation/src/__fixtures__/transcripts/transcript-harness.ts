@@ -56,9 +56,14 @@ export interface IScriptedCase {
   readonly since: string;
   readonly brain: (plan: IInvestigationPlan) => Brain;
   readonly env?: Readonly<Record<string, string>>;
+  /** Defaults to `functionality:checkout`. */
+  readonly entry?: string;
 }
 
-/** The committed CI transcripts (ADR 0007): the three fixture walks, by the scripted model. */
+/**
+ * The committed CI transcripts (ADR 0007): the three fixture walks by the scripted model, and the
+ * error burst entered from `payments`, whose plan checks the flow it serves for impact.
+ */
 export const CI_CASES: readonly IScriptedCase[] = [
   { name: 'error-burst-30s', scenario: 'error-burst-30s', since: '2m', brain: investigator },
   {
@@ -70,6 +75,13 @@ export const CI_CASES: readonly IScriptedCase[] = [
     env: { INVESTIGATION_LOG_SAMPLE_LIMIT: '40' },
   },
   { name: 'healthy-baseline', scenario: 'healthy-baseline', since: '60m', brain: investigator },
+  {
+    name: 'payments-impact',
+    scenario: 'error-burst-30s',
+    since: '2m',
+    brain: investigator,
+    entry: 'component:payments',
+  },
 ];
 
 /** `libs/investigation/src/__fixtures__/transcripts`, from wherever the spec runs. */
@@ -109,7 +121,7 @@ export async function recordScripted(scripted: IScriptedCase): Promise<ITranscri
         query: 'checkouts are not working',
         environment: 'prod',
         since: scripted.since,
-        entry: 'functionality:checkout',
+        entry: scripted.entry ?? 'functionality:checkout',
         planOnly: false,
       },
       manifest: readFileSync(referenceManifestPath(ReferenceManifest.Checkout), 'utf8'),

@@ -101,7 +101,10 @@ export class InvestigateCommand extends HeimdallCommand {
     return false;
   }
 
-  @Option({ flags: '--json', description: 'Emit the plan as one JSON object' })
+  @Option({
+    flags: '--json',
+    description: 'Emit the report as one JSON object; the plan under --plan-only',
+  })
   parseJson(): boolean {
     return true;
   }

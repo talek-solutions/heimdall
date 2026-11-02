@@ -7960,6 +7960,36 @@
       }
     ],
     "report": {
+      "schemaVersion": 1,
+      "outcome": "no-signal",
+      "conclusion": {
+        "outcome": "no-signal",
+        "summary": "Nothing in scope deviates from its baseline.",
+        "verdicts": [
+          {"result":"r1","verdict":"healthy","reason":"kpi normal"},
+          {"result":"r2","verdict":"healthy","reason":"latency met"},
+          {"result":"r3","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r4","verdict":"healthy","reason":"errors borderline"},
+          {"result":"r5","verdict":"healthy","reason":"latency normal"},
+          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r7","verdict":"healthy","reason":"errors normal"},
+          {"result":"r8","verdict":"healthy","reason":"latency normal"},
+          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r10","verdict":"healthy","reason":"latency normal"},
+          {"result":"r11","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r12","verdict":"healthy","reason":"errors normal"},
+          {"result":"r13","verdict":"healthy","reason":"latency normal"},
+          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r15","verdict":"no-data","reason":"errors no-data"},
+          {"result":"r16","verdict":"no-data","reason":"latency no-data"}
+        ],
+        "evidence": [],
+        "confidence": 0.7,
+        "mitigations": []
+      },
+      "keyFigures": [],
+      "blindSpots": [],
+      "impact": {"status":"not-planned","subjects":[]},
       "plan": {
         "query": "checkouts are not working",
         "system": "storefront",
@@ -8838,6 +8868,157 @@
           "problem": null
         }
       ],
+      "profiles": {
+        "r1": {
+          "points": [113.3,113.8,116.1,112.9,116.9,112.8,111.2,114.6,113.8,116.4,114.1,121.1],
+          "bucketSeconds": 300,
+          "last": 110,
+          "shape": "flat",
+          "state": null
+        },
+        "r2": {
+          "points": [0.1803,0.1879,0.1799,0.1773,0.2004,0.1839,0.1803,0.1942,0.1841,0.1827,0.1956,0.1839],
+          "bucketSeconds": 300,
+          "last": 0.1719,
+          "shape": "flat",
+          "state": null
+        },
+        "r3": {
+          "points": [113.4,113.9,116.3,113,117,112.9,111.3,114.7,113.9,116.5,114.3,121.2],
+          "bucketSeconds": 300,
+          "last": 110.1,
+          "shape": "flat",
+          "state": null
+        },
+        "r4": {
+          "points": [
+            0.001882,
+            0.001672,
+            0.001651,
+            0.002018,
+            0.001754,
+            0.001603,
+            0.001749,
+            0.002254,
+            0.001795,
+            0.001873,
+            0.001739,
+            0.001595
+          ],
+          "bucketSeconds": 300,
+          "last": 0.001277,
+          "shape": "spike",
+          "state": "recovered"
+        },
+        "r5": {
+          "points": [0.1803,0.1879,0.1799,0.1773,0.2004,0.1839,0.1803,0.1942,0.1841,0.1827,0.1956,0.1839],
+          "bucketSeconds": 300,
+          "last": 0.1719,
+          "shape": "flat",
+          "state": null
+        },
+        "r6": {
+          "points": [118,118.2,119.1,119.7,118,119.8,120,118.7,122.7,120.9,117.5,121.7],
+          "bucketSeconds": 300,
+          "last": 133.7,
+          "shape": "flat",
+          "state": null
+        },
+        "r7": {
+          "points": [
+            0.0006196,
+            0.0007224,
+            0.0006958,
+            0.0006336,
+            0.0005306,
+            0.0006083,
+            0.0007103,
+            0.0005783,
+            0.0005954,
+            0.0005583,
+            0.0005393,
+            0.0004916
+          ],
+          "bucketSeconds": 300,
+          "last": 0.0003728,
+          "shape": "flat",
+          "state": null
+        },
+        "r8": {
+          "points": [
+            0.0948,
+            0.08967,
+            0.09748,
+            0.09237,
+            0.09211,
+            0.09563,
+            0.09544,
+            0.09391,
+            0.09273,
+            0.09857,
+            0.09524,
+            0.09995
+          ],
+          "bucketSeconds": 300,
+          "last": 0.09064,
+          "shape": "flat",
+          "state": null
+        },
+        "r10": {
+          "points": [
+            0.01542,
+            0.01585,
+            0.01522,
+            0.01485,
+            0.0137,
+            0.01527,
+            0.01543,
+            0.01498,
+            0.01503,
+            0.01386,
+            0.01515,
+            0.01464
+          ],
+          "bucketSeconds": 300,
+          "last": 0.01324,
+          "shape": "flat",
+          "state": null
+        },
+        "r11": {
+          "points": [43.27,45.69,44.12,46.67,46.3,44.1,42.98,44.85,45.39,45.28,44.01,46.05],
+          "bucketSeconds": 300,
+          "last": 46.29,
+          "shape": "flat",
+          "state": null
+        },
+        "r12": {
+          "points": [
+            0.001146,
+            0.001309,
+            0.001132,
+            0.001055,
+            0.001339,
+            0.001354,
+            0.001001,
+            0.001224,
+            0.00115,
+            0.001109,
+            0.001256,
+            0.00122
+          ],
+          "bucketSeconds": 300,
+          "last": 0.0007271,
+          "shape": "flat",
+          "state": null
+        },
+        "r13": {
+          "points": [0.2196,0.2142,0.2142,0.213,0.2175,0.236,0.2115,0.2075,0.2258,0.2094,0.2239,0.2115],
+          "bucketSeconds": 300,
+          "last": 0.1689,
+          "shape": "flat",
+          "state": null
+        }
+      },
       "redaction": {"totals":{"records":0,"fieldsDropped":0,"truncated":0,"matches":{}},"droppedFields":[]},
       "reachedPruned": [],
       "usage": {
@@ -8848,32 +9029,6 @@
         "cachedInputTokens": 0,
         "toolCost": 32,
         "elapsedMs": 0
-      },
-      "outcome": "no-signal",
-      "conclusion": {
-        "outcome": "no-signal",
-        "summary": "Nothing in scope deviates from its baseline.",
-        "verdicts": [
-          {"result":"r1","verdict":"healthy","reason":"kpi normal"},
-          {"result":"r2","verdict":"healthy","reason":"latency met"},
-          {"result":"r3","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r4","verdict":"healthy","reason":"errors borderline"},
-          {"result":"r5","verdict":"healthy","reason":"latency normal"},
-          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r7","verdict":"healthy","reason":"errors normal"},
-          {"result":"r8","verdict":"healthy","reason":"latency normal"},
-          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r10","verdict":"healthy","reason":"latency normal"},
-          {"result":"r11","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r12","verdict":"healthy","reason":"errors normal"},
-          {"result":"r13","verdict":"healthy","reason":"latency normal"},
-          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r15","verdict":"no-data","reason":"errors no-data"},
-          {"result":"r16","verdict":"no-data","reason":"latency no-data"}
-        ],
-        "evidence": [],
-        "confidence": 0.7,
-        "mitigations": []
       }
     }
   }

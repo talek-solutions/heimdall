@@ -159,3 +159,28 @@ those of ADR 0016: `investigation.check_completed`, `investigation.agent_turn` a
 **Will regret if:** models routinely ignore the plan and wander within the budget. Then the plan
 should become binding for the confirm and localise tiers, with the loop reserved for explain and
 corroborate.
+
+## Amendment (2026-11-01): the report
+
+The report is specified in [investigation-report.md](../schema/investigation-report.md), for story
+[0018-03](../stories/0018-investigation-execution/03-mitigations-and-report.md).
+
+- **Code derives everything around the conclusion.** A `ReportBuilder` picks the key figures,
+  the blind spots the conclusion leans on, and impact, from the plan, the results and the
+  conclusion. The `conclude` tool and the prompt are unchanged. Impact comes from the plan's impact
+  checks, so it can never read as a cause. Every rule is tested without a model, and eval scores
+  stay comparable with earlier runs.
+- **Profiles stay out of the model's input.** The check runner, the only place that still holds a
+  series, keeps it in 12 points with a shape and a state, beside the result rather than in it,
+  as dropped field names are kept. Prompts and tool results of the CI transcripts are unchanged
+  byte for byte. Whether the model reasons better with profiles is for a measured eval experiment,
+  not an assumption.
+- **The report carries `schemaVersion: 1`.** Eval and replay already parse it, and notifications
+  (US-002) will.
+- **The transcript is the report's only store.** `heimdall report` reads it back, so the report
+  has the transcript's retention, permissions and redaction, and no second policy.
+- **Golden files pin the text.** The committed transcripts and replay already pin the JSON. A
+  fourth CI transcript, `payments-impact`, enters at a component so that impact is exercised.
+
+**Hard:** the text layout changed. It is not a contract (ADR 0006); the JSON changed only by
+additions.

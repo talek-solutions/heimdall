@@ -14,15 +14,12 @@ import { InvestigationEventType } from '../enums';
 import type { IInvestigationEvent, IInvestigationPlan } from '../interfaces';
 import { INVESTIGATION_CONFIG } from '../investigation.tokens';
 import { INVESTIGATION_SYSTEM_PROMPT, seedMessage } from './agent/investigation.prompt';
-import type { ICheckResult } from './checks/check-result.interface';
 import { CheckRunner } from './checks/check.runner';
-import { ResultKind } from './checks/result-kind.enum';
-import { ConclusionOutcome } from './conclusion/conclusion.enums';
 import { ConclusionValidator } from './conclusion/conclusion.validator';
 import { ExecutionSession } from './execution.session';
 import type { IInvestigationReport } from './investigation-report.interface';
-import type { IEvidenceRedaction } from './evidence/evidence-result.interface';
 import { EvidenceRunner } from './evidence/evidence.runner';
+import { ReportBuilder } from './report/report.builder';
 import { TelemetrySourcesResolver } from './sources/telemetry-sources.resolver';
 import { checkIndicatorTool } from './tools/check-indicator.tool';
 import { concludeTool } from './tools/conclude.tool';
@@ -49,6 +46,7 @@ export class InvestigationExecutionService {
     private readonly evidence: EvidenceRunner,
     private readonly validator: ConclusionValidator,
     private readonly sources: TelemetrySourcesResolver,
+    private readonly reports: ReportBuilder,
     @Inject(INVESTIGATION_CONFIG) private readonly config: IInvestigationConfig,
   ) {}
 
@@ -89,24 +87,18 @@ export class InvestigationExecutionService {
       fallbackOnRefusal: true,
       onEvent: (event) => this.forward(event, emit),
     });
-    const results = session.all;
-    const shared = {
+    const report = this.reports.build({
       plan,
-      results,
-      redaction: { totals: redactionTotals(results), droppedFields: session.droppedFields },
+      results: session.all,
+      profiles: session.profiles,
+      droppedFields: session.droppedFields,
       reachedPruned: [...session.reachedPruned],
+      ...(run.outcome === AgentOutcome.Completed
+        ? { conclusion: run.output }
+        : { conclusion: undefined, agentReason: run.reason }),
       usage: run.usage,
       traceId: run.traceId,
-    };
-    const report: IInvestigationReport =
-      run.outcome === AgentOutcome.Completed
-        ? { ...shared, outcome: run.output.outcome, conclusion: run.output }
-        : {
-            ...shared,
-            outcome: ConclusionOutcome.Inconclusive,
-            conclusion: undefined,
-            agentReason: run.reason,
-          };
+    });
 
     emit({ type: InvestigationEventType.Concluded, report });
     return report;
@@ -124,30 +116,4 @@ export class InvestigationExecutionService {
       });
     }
   }
-}
-
-/** Sums what every evidence result redacted; the counts the agent also saw. */
-function redactionTotals(results: readonly ICheckResult[]): IEvidenceRedaction {
-  const matches = new Map<string, number>();
-  let records = 0;
-  let fieldsDropped = 0;
-  let truncated = 0;
-
-  for (const result of results) {
-    if (result.kind === ResultKind.Indicator) {
-      continue;
-    }
-    records += result.redaction.records;
-    fieldsDropped += result.redaction.fieldsDropped;
-    truncated += result.redaction.truncated;
-    for (const [scrubber, count] of Object.entries(result.redaction.matches)) {
-      matches.set(scrubber, (matches.get(scrubber) ?? 0) + count);
-    }
-  }
-  return {
-    records,
-    fieldsDropped,
-    truncated,
-    matches: Object.fromEntries([...matches].sort(([a], [b]) => a.localeCompare(b))),
-  };
 }

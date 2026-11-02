@@ -7,7 +7,8 @@ import { ObjectiveVerdict, PreliminarySignal } from '../health/health.enums';
 import { ConclusionOutcome, ResultVerdict } from './conclusion.enums';
 import type { IConclusion } from './conclusion.interface';
 
-const OBJECTIVE: Readonly<Record<ObjectiveVerdict, ResultVerdict>> = {
+/** Code's verdicts, as the verdicts a conclusion gives: they must agree. */
+export const OBJECTIVE: Readonly<Record<ObjectiveVerdict, ResultVerdict>> = {
   [ObjectiveVerdict.Met]: ResultVerdict.Healthy,
   [ObjectiveVerdict.Breached]: ResultVerdict.Unhealthy,
   [ObjectiveVerdict.NoData]: ResultVerdict.NoData,

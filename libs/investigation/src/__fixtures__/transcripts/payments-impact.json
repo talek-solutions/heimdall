@@ -1,0 +1,2928 @@
+{
+  "version": 1,
+  "meta": {
+    "heimdall": "scripted",
+    "recordedAt": "2026-10-17T08:00:00.000Z",
+    "command": {
+      "query": "checkouts are not working",
+      "environment": "prod",
+      "since": "2m",
+      "entry": "component:payments",
+      "planOnly": false
+    },
+    "manifest": {
+      "sha256": "d2f1d7b1df60d339d413a41f55b9b048c8498fe39aba150586c1562c4b3733af",
+      "content": "# Reference system manifest shaped after the telemetry fixture scenarios in\n# libs/telemetry/scenarios (error-burst-30s, increased-latency-1, healthy-baseline): the\n# same services, metric names and labels, so an investigation can run end to end against\n# fixtures. See README.md in this folder.\napiVersion: heimdall/v1\nkind: System\nmetadata: { name: storefront }\nspec:\n  description: Web checkout with stock reservation and card payments\n  environments:\n    - name: prod\n      context: prod\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: web, system: storefront }\nspec:\n  type: frontend\n  description: The storefront in the browser; emits no telemetry of its own\n  dependsOn:\n    - name: checkout-api\n      target: checkout\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /api/checkout']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: checkout, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /api/checkout }\n  telemetry:\n    # Mapped fields are the only ones that reach the model (ADR 0008): dsn, customer and\n    # authorization stay unmapped on purpose.\n    logs:\n      selector: '{service_name=\"checkout\"}'\n      fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId, error: error, operation: operation, table: table, duration_ms: durationMs, pool: pool }\n    metrics: { matchers: { service: checkout } }\n    traces: { serviceName: checkout }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: db_client_operation_duration_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { db_operation_name: operation, db_collection_name: table } }\n    - { name: db_client_connections_usage, type: gauge, role: saturation, description: Connections in use in the orders-pg pool }\n    - { name: db_client_connections_pending_requests, type: gauge, role: saturation, description: Requests waiting for an orders-pg connection }\n  dependsOn:\n    - name: reserve-stock\n      target: inventory\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /reserve']\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n      config: { poolSize: 50 }\n    - name: charge\n      target: payments\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /charges']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payments, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /charges }\n  telemetry:\n    logs: { selector: '{service_name=\"payments\"}', fields: { level: severity, msg: message, trace_id: traceId, payment_id: paymentId } }\n    metrics: { matchers: { service: payments } }\n    traces: { serviceName: payments }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: http_client_request_duration_seconds, type: histogram, unit: seconds, measures: { outbound: provider }, labels: { http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: provider\n      target: payment-provider\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /v1/payment_intents']\n      config: { maxAttempts: 3 }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: inventory, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /reserve }\n  telemetry:\n    logs: { selector: '{service_name=\"inventory\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { service: inventory } }\n    traces: { serviceName: inventory }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: stock-cache\n      target: stock-cache\n      transport: redis\n      mode: sync\n      criticality: soft\n      role: cache-aside\n      operations: [GET]\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: stock-cache, system: storefront }\nspec:\n  type: cache\n  engine: redis\n  description: Stock levels cached in front of inventory's own database\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payment-provider, system: storefront }\nspec:\n  type: vendor\n  description: External card processor at api.stripe.com; observed only through payments' client metrics\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-pg, system: storefront }\nspec:\n  type: datastore\n  engine: postgresql\n  telemetry:\n    logs: { selector: '{service_name=\"orders-pg\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { datname: orders } }\n  dataModel:\n    - { kind: table, name: orders }\n  metrics:\n    - { name: pg_stat_activity_count, type: gauge, role: saturation }\n    - { name: pg_locks_count, type: gauge, role: saturation }\n    - { name: pg_stat_activity_max_tx_duration, type: gauge, unit: seconds }\n  indicators:\n    - { metric: pg_stat_activity_max_tx_duration, role: saturation, expect: { kind: threshold, max: 30 } }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-reconcile, system: storefront }\nspec:\n  type: worker\n  description: Periodic batch job reconciling orders against payments\n  telemetry:\n    logs: { selector: '{service_name=\"orders-reconcile\"}', fields: { level: severity, msg: message, table: table, isolation: isolation, tx_open_seconds: txOpenSeconds } }\n  dependsOn:\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n---\napiVersion: heimdall/v1\nkind: Functionality\nmetadata: { name: checkout, system: storefront }\nspec:\n  description: Customers pay for their cart and an order is placed\n  flows: [place-order]\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: kpi, expect: { kind: baseline }, description: Checkout requests served }\n---\napiVersion: heimdall/v1\nkind: Flow\nmetadata: { name: place-order, system: storefront }\nspec:\n  description: The browser submits the cart; checkout reserves stock, records the order and charges the card\n  mode: sync\n  steps:\n    - { dependency: web/checkout-api, match: { route: /api/checkout, method: POST } }\n    - { dependency: checkout/reserve-stock, match: { route: /reserve, method: POST } }\n    - { dependency: checkout/orders-db, match: { operation: UPDATE, table: orders } }\n    - { dependency: checkout/charge, match: { route: /charges, method: POST } }\n    - { dependency: payments/provider, match: { method: POST } }\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: latency, expect: { kind: slo, p99: 1 } }\n"
+    },
+    "datasources": {
+      "datasources": {"prometheus":"fixture","loki":"fixture","tempo":"fixture"},
+      "fixture": {"scenario":"error-burst-30s","anchor":"2026-10-17T08:00:00.000Z"}
+    }
+  },
+  "environment": {
+    "variables": {
+      "LOKI_DATASOURCE_TYPE": "fixture",
+      "PROMETHEUS_DATASOURCE_TYPE": "fixture",
+      "TELEMETRY_FIXTURE_ANCHOR": "2026-10-17T08:00:00.000Z",
+      "TELEMETRY_FIXTURE_SCENARIO": "error-burst-30s",
+      "TEMPO_DATASOURCE_TYPE": "fixture"
+    }
+  },
+  "pins": {
+    "now": {"value":"2026-10-17T08:00:00.000Z"},
+    "sources": {
+      "value": {
+        "metrics": {"url":"http://prometheus.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}},
+        "logs": {
+          "ok": true,
+          "source": {"url":"http://loki.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}}
+        },
+        "traces": {
+          "ok": true,
+          "source": {"url":"http://tempo.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}}
+        }
+      }
+    }
+  },
+  "model": [
+    {
+      "call": 1,
+      "request": {
+        "model": "claude-opus-5-5",
+        "system": "You are Heimdall's investigation agent. An engineer reported a problem. Heimdall has located where in the system it most likely lives and planned checks against the system's telemetry. Find out what is broken, where the fault starts and why, using the tools, then call conclude. Heimdall is read-only: you observe, you never change the system.\n\nMethod\n1. Confirm: is it broken, and since when? The onset can narrow the window for the rest.\n2. Localise: run the step checks of each suspect flow. The fault starts at the deepest unhealthy step of a sync flow, and at the first unhealthy stage of an async flow.\n3. Explain and corroborate: run the checks whose condition names the origin step; checks gated on other steps are rarely needed.\n4. Impact: what else is hurt. It is reported, never a cause.\nUse run_checks for planned checks, check_indicator for any other indicator in reach, search_logs, search_traces and get_trace for logs and spans beyond the plan, and describe_vertex, subgraph and impact to read the system's structure.\n\nReading results\n- Every result has an id (r1, r2, ...). Cite these ids when you conclude.\n- verdict is code's verdict for slo, threshold and nonZero expectations (met, breached, no-data). It stands; you cannot override it.\n- For baseline expectations, signal is a preliminary reading from robust statistics (no-data, anomalous, borderline, normal): the peak's z-score and effect against the baseline median, the longest run of deviating points, and the onset. You decide the verdict.\n- no-data is never healthy. When a step without data sits deeper than the deepest unhealthy step of a sync flow, the origin is uncertain.\n- A result with zoom deviated briefly or borderline at its step. Re-run the check over that window before deciding.\n- direction says which way a throughput or KPI moved.\n- Logs and traces results are evidence: cite them, never give them a verdict. They come from samples of the window and of the baseline before it, so counts are of the samples, not totals.\n- A logs result groups lines by template (variable parts as <*>). new templates are absent from the baseline (confirmedAbsent says a baseline query agreed), surging ones grew at least threefold; both carry the first and last example. A component whose stream is new only logs in the window, e.g. a job that started then. correlation lists key values to search the other side of a hop with.\n- A traces result lists the subject's operations that are new, slower (p50 or share of the trace) or failing more than in the baseline, with an exemplar trace. get_trace reads a trace id found in a log example.\n- Only fields the manifest maps reach you, and secrets are replaced by [REDACTED:<kind>]. redaction counts what was dropped or replaced; if evidence you need was dropped, say so rather than guess.\n\nBudget\nEvery turn and every backend query counts. Batch checks into one run_checks call where you can.\n\nConcluding\n- cause-found: the cause vertex and its mechanism, the origin step, the results that show it, and mitigations in three tiers (immediate, short-term, prevention), each with its trade-off.\n- no-signal: nothing in scope is unhealthy.\n- inconclusive: something is wrong, but the evidence does not settle what. Say what is missing.\nGive a verdict (healthy, unhealthy, no-data) for every result you rely on. When the cause is a blind spot, say that the conclusion rests on its callers' view of it.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Report: \"checkouts are not working\" in storefront · prod\nWindow: 2026-10-17T07:58:00.000Z → 2026-10-17T08:00:00.000Z, against 2026-10-17T07:56:00.000Z → 2026-10-17T07:58:00.000Z\nSymptom roles: throughput, errors, latency, saturation, lag, kpi (unclassified)\nEntry: component:payments (flag)\n\nSystem\nsystem storefront · env prod — Web checkout with stock reservation and card payments\nfunctionality:checkout — Customers pay for their cart and an order is placed | kpi checkout/http_server_request_duration_seconds ~baseline\n  flow:place-order  sync: web/checkout-api POST /api/checkout ▸ checkout/reserve-stock POST /reserve ▸ checkout/orders-db UPDATE orders ▸ checkout/charge POST /charges ▸ payments/provider POST — The browser submits the cart; checkout reserves stock, records the order and charges the card\ncomponent:web  frontend — The storefront in the browser; emits no telemetry of its own → checkout http sync hard\ncomponent:checkout  service → inventory http sync hard · orders-pg sql sync hard · payments http sync hard\ncomponent:payments  service → payment-provider http sync hard\ncomponent:inventory  service → stock-cache redis sync soft\ncomponent:stock-cache  cache redis — Stock levels cached in front of inventory's own database\ncomponent:payment-provider  vendor — External card processor at api.stripe.com; observed only through payments' client metrics\ncomponent:orders-pg  datastore postgresql\ncomponent:orders-reconcile  worker — Periodic batch job reconciling orders against payments → orders-pg sql sync hard\nnot on any flow: dependency:inventory/stock-cache, dependency:orders-reconcile/orders-db\n\n\nScope\nsuspect flows: (none)\nimpact flows: flow:place-order\nin scope: component:payments (entry), dependency:payments/provider (path-dependency), component:payment-provider (path-component), dependency:checkout/charge (contention), component:checkout (contention)\npruned: component:web (unreachable), dependency:web/checkout-api (beyond-hop-budget), dependency:checkout/reserve-stock (beyond-hop-budget), dependency:checkout/orders-db (beyond-hop-budget), component:inventory (unreachable), dependency:inventory/stock-cache (unreachable), component:stock-cache (unreachable), component:orders-pg (unreachable), component:orders-reconcile (unreachable), dependency:orders-reconcile/orders-db (unreachable)\nblind spots: component:payment-provider (no-telemetry)\n\nPlan (9 checks)\nc1 confirm component:payments · throughput/errors/latency payments/http_server_request_duration_seconds ~baseline · roles throughput/errors/latency — The entry itself: confirms the symptom and when it started\nc2 localise step:place-order#5 · throughput/errors/latency payments/http_client_request_duration_seconds {POST} ~baseline · roles throughput/errors/latency — payments depends on payment-provider (hard)\nc3 explain step:place-order#4 · throughput/errors/latency payments/http_server_request_duration_seconds {POST /charges} ~baseline · roles throughput/errors/latency — checkout also uses payments\nc4 explain component:checkout · saturation checkout/db_client_connections_usage ~baseline · roles saturation — checkout also uses payments\nc5 explain component:checkout · saturation checkout/db_client_connections_pending_requests ~baseline · roles saturation — checkout also uses payments\nc6 corroborate component:checkout · logs · caller of dependency:checkout/charge — Logs of checkout: checkout also uses payments\nc7 corroborate component:payments · logs — Logs of payments\nc8 corroborate component:payments · traces — Spans of payments\nc9 impact flow:place-order · latency checkout/http_server_request_duration_seconds slo p99≤1 · roles latency — place-order can be hit downstream"
+          }
+        ],
+        "tools": [
+          {
+            "name": "check_indicator",
+            "description": "Run any indicator by id (indicator:<subject>@<n>, see describe_vertex), planned or not, over every role it serves. Its subject must be in scope; for a pruned subject, say why in reason.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "indicator": {"type":"string","description":"An indicator id"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned subject"}
+              },
+              "required": ["indicator"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "conclude",
+            "description": "End the investigation. Give a verdict for every result you rely on, cite result ids as evidence, and for a cause propose mitigations in three tiers with their trade-offs. Code checks the conclusion against the results; a rejected one comes back once to be fixed.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "outcome": {"type":"string","enum":["cause-found","no-signal","inconclusive"]},
+                "summary": {"type":"string","description":"Two or three sentences for the engineer"},
+                "cause": {
+                  "type": "object",
+                  "properties": {
+                    "vertex": {
+                      "type": "string",
+                      "description": "The vertex at fault, e.g. component:payment-provider"
+                    },
+                    "mechanism": {"type":"string","description":"What happened there, in one sentence"}
+                  },
+                  "required": ["vertex","mechanism"],
+                  "additionalProperties": false
+                },
+                "origin": {
+                  "type": "object",
+                  "description": "The step the fault starts at, by the origin rule",
+                  "properties": {
+                    "step": {"type":"string"},
+                    "uncertain": {
+                      "type": "boolean",
+                      "description": "True when a step without data could be the origin"
+                    }
+                  },
+                  "required": ["step","uncertain"],
+                  "additionalProperties": false
+                },
+                "verdicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "result": {"type":"string","description":"A result id, e.g. r3"},
+                      "verdict": {"type":"string","enum":["healthy","unhealthy","no-data"]},
+                      "reason": {"type":"string"}
+                    },
+                    "required": ["result","verdict","reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "description": "Result ids the conclusion rests on"
+                },
+                "confidence": {"type":"number"},
+                "mitigations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tier": {"type":"string","enum":["immediate","short-term","prevention"]},
+                      "action": {"type":"string"},
+                      "tradeoff": {"type":"string"}
+                    },
+                    "required": ["tier","action","tradeoff"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["outcome","summary","verdicts","evidence","confidence","mitigations"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "describe_vertex",
+            "description": "Describe one vertex: its properties, its indicators (with ids for check_indicator), its edges, and whether it is in scope.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "get_trace",
+            "description": "Read one trace by id, e.g. a traceId field of a log example, as a redacted span tree: services, operations, durations, statuses and allowlisted attributes.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {"traceId":{"type":"string","description":"A hex trace id"}},
+              "required": ["traceId"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "impact",
+            "description": "What depends on a vertex, up to the flows and functionalities it can break.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "run_checks",
+            "description": "Run planned checks by id (c1, c2, …). An indicator check returns, per role, deviation statistics against the baseline and, for SLO, threshold and nonZero expectations, code's verdict. A logs check returns log templates that are new or surging against the baseline, with redacted examples; a traces check returns the subject's span operations that got slower, are new or fail, with an exemplar trace. Pass a narrower window to zoom in, e.g. from an onset.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "minItems": 1,
+                  "description": "Planned check ids, at most 10 per call"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["checks"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_logs",
+            "description": "Read a component's logs, planned or not: templates that are new, surging or vanished against the baseline, with redacted examples. contains narrows to lines holding a literal text, e.g. a correlation value from another result. Only fields the manifest maps are returned.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "contains": {
+                  "type": "string",
+                  "description": "Optional literal text a line must contain (no regex), at most 100 characters"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_traces",
+            "description": "Read a component's spans, planned or not: its operations (span names) that got slower, are new or fail against the baseline, with an exemplar trace. operation narrows to one span name; errorsOnly reads failed spans only.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "operation": {"type":"string","description":"Optional exact span name"},
+                "errorsOnly": {"type":"boolean","description":"Only spans with an error status"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "subgraph",
+            "description": "The vertices and edges within 1 or 2 hops of a vertex, indicators left out.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                },
+                "hops": {"type":"integer","enum":[1,2]}
+              },
+              "required": ["vertex","hops"],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        ],
+        "toolChoice": {"type":"auto"},
+        "maxTokens": 16000,
+        "reasoning": {"effort":"high"},
+        "fallbackOnRefusal": true,
+        "providerOptions": {"systemCacheControl":{"type":"ephemeral"}}
+      },
+      "response": {
+        "id": "msg_1",
+        "model": "claude-opus-5-5",
+        "role": "assistant",
+        "content": [{"type":"tool_call","id":"call-1","name":"run_checks","input":{"checks":["c1","c2","c9"]}}],
+        "finishReason": "tool_calls",
+        "usage": {"inputTokens":2000,"outputTokens":300}
+      }
+    },
+    {
+      "call": 2,
+      "request": {
+        "model": "claude-opus-5-5",
+        "system": "You are Heimdall's investigation agent. An engineer reported a problem. Heimdall has located where in the system it most likely lives and planned checks against the system's telemetry. Find out what is broken, where the fault starts and why, using the tools, then call conclude. Heimdall is read-only: you observe, you never change the system.\n\nMethod\n1. Confirm: is it broken, and since when? The onset can narrow the window for the rest.\n2. Localise: run the step checks of each suspect flow. The fault starts at the deepest unhealthy step of a sync flow, and at the first unhealthy stage of an async flow.\n3. Explain and corroborate: run the checks whose condition names the origin step; checks gated on other steps are rarely needed.\n4. Impact: what else is hurt. It is reported, never a cause.\nUse run_checks for planned checks, check_indicator for any other indicator in reach, search_logs, search_traces and get_trace for logs and spans beyond the plan, and describe_vertex, subgraph and impact to read the system's structure.\n\nReading results\n- Every result has an id (r1, r2, ...). Cite these ids when you conclude.\n- verdict is code's verdict for slo, threshold and nonZero expectations (met, breached, no-data). It stands; you cannot override it.\n- For baseline expectations, signal is a preliminary reading from robust statistics (no-data, anomalous, borderline, normal): the peak's z-score and effect against the baseline median, the longest run of deviating points, and the onset. You decide the verdict.\n- no-data is never healthy. When a step without data sits deeper than the deepest unhealthy step of a sync flow, the origin is uncertain.\n- A result with zoom deviated briefly or borderline at its step. Re-run the check over that window before deciding.\n- direction says which way a throughput or KPI moved.\n- Logs and traces results are evidence: cite them, never give them a verdict. They come from samples of the window and of the baseline before it, so counts are of the samples, not totals.\n- A logs result groups lines by template (variable parts as <*>). new templates are absent from the baseline (confirmedAbsent says a baseline query agreed), surging ones grew at least threefold; both carry the first and last example. A component whose stream is new only logs in the window, e.g. a job that started then. correlation lists key values to search the other side of a hop with.\n- A traces result lists the subject's operations that are new, slower (p50 or share of the trace) or failing more than in the baseline, with an exemplar trace. get_trace reads a trace id found in a log example.\n- Only fields the manifest maps reach you, and secrets are replaced by [REDACTED:<kind>]. redaction counts what was dropped or replaced; if evidence you need was dropped, say so rather than guess.\n\nBudget\nEvery turn and every backend query counts. Batch checks into one run_checks call where you can.\n\nConcluding\n- cause-found: the cause vertex and its mechanism, the origin step, the results that show it, and mitigations in three tiers (immediate, short-term, prevention), each with its trade-off.\n- no-signal: nothing in scope is unhealthy.\n- inconclusive: something is wrong, but the evidence does not settle what. Say what is missing.\nGive a verdict (healthy, unhealthy, no-data) for every result you rely on. When the cause is a blind spot, say that the conclusion rests on its callers' view of it.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Report: \"checkouts are not working\" in storefront · prod\nWindow: 2026-10-17T07:58:00.000Z → 2026-10-17T08:00:00.000Z, against 2026-10-17T07:56:00.000Z → 2026-10-17T07:58:00.000Z\nSymptom roles: throughput, errors, latency, saturation, lag, kpi (unclassified)\nEntry: component:payments (flag)\n\nSystem\nsystem storefront · env prod — Web checkout with stock reservation and card payments\nfunctionality:checkout — Customers pay for their cart and an order is placed | kpi checkout/http_server_request_duration_seconds ~baseline\n  flow:place-order  sync: web/checkout-api POST /api/checkout ▸ checkout/reserve-stock POST /reserve ▸ checkout/orders-db UPDATE orders ▸ checkout/charge POST /charges ▸ payments/provider POST — The browser submits the cart; checkout reserves stock, records the order and charges the card\ncomponent:web  frontend — The storefront in the browser; emits no telemetry of its own → checkout http sync hard\ncomponent:checkout  service → inventory http sync hard · orders-pg sql sync hard · payments http sync hard\ncomponent:payments  service → payment-provider http sync hard\ncomponent:inventory  service → stock-cache redis sync soft\ncomponent:stock-cache  cache redis — Stock levels cached in front of inventory's own database\ncomponent:payment-provider  vendor — External card processor at api.stripe.com; observed only through payments' client metrics\ncomponent:orders-pg  datastore postgresql\ncomponent:orders-reconcile  worker — Periodic batch job reconciling orders against payments → orders-pg sql sync hard\nnot on any flow: dependency:inventory/stock-cache, dependency:orders-reconcile/orders-db\n\n\nScope\nsuspect flows: (none)\nimpact flows: flow:place-order\nin scope: component:payments (entry), dependency:payments/provider (path-dependency), component:payment-provider (path-component), dependency:checkout/charge (contention), component:checkout (contention)\npruned: component:web (unreachable), dependency:web/checkout-api (beyond-hop-budget), dependency:checkout/reserve-stock (beyond-hop-budget), dependency:checkout/orders-db (beyond-hop-budget), component:inventory (unreachable), dependency:inventory/stock-cache (unreachable), component:stock-cache (unreachable), component:orders-pg (unreachable), component:orders-reconcile (unreachable), dependency:orders-reconcile/orders-db (unreachable)\nblind spots: component:payment-provider (no-telemetry)\n\nPlan (9 checks)\nc1 confirm component:payments · throughput/errors/latency payments/http_server_request_duration_seconds ~baseline · roles throughput/errors/latency — The entry itself: confirms the symptom and when it started\nc2 localise step:place-order#5 · throughput/errors/latency payments/http_client_request_duration_seconds {POST} ~baseline · roles throughput/errors/latency — payments depends on payment-provider (hard)\nc3 explain step:place-order#4 · throughput/errors/latency payments/http_server_request_duration_seconds {POST /charges} ~baseline · roles throughput/errors/latency — checkout also uses payments\nc4 explain component:checkout · saturation checkout/db_client_connections_usage ~baseline · roles saturation — checkout also uses payments\nc5 explain component:checkout · saturation checkout/db_client_connections_pending_requests ~baseline · roles saturation — checkout also uses payments\nc6 corroborate component:checkout · logs · caller of dependency:checkout/charge — Logs of checkout: checkout also uses payments\nc7 corroborate component:payments · logs — Logs of payments\nc8 corroborate component:payments · traces — Spans of payments\nc9 impact flow:place-order · latency checkout/http_server_request_duration_seconds slo p99≤1 · roles latency — place-order can be hit downstream"
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "id": "call-1",
+                "name": "run_checks",
+                "input": {"checks":["c1","c2","c9"]}
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolCallId": "call-1",
+                "content": "{\"results\":[{\"result\":\"r1\",\"kind\":\"indicator\",\"check\":\"c1\",\"indicator\":\"indicator:component:payments@1\",\"subject\":\"component:payments\",\"role\":\"throughput\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"normal\",\"direction\":\"up\",\"unit\":\"per second\",\"baseline\":{\"median\":52.03,\"spread\":1.795},\"peak\":{\"value\":56.85,\"at\":\"2026-10-17T07:59:29.000Z\",\"z\":2.681,\"effectPercent\":9.25},\"longestRun\":0,\"onset\":null,\"breachOnset\":null,\"coverage\":1,\"zoom\":null,\"problem\":null},{\"result\":\"r2\",\"kind\":\"indicator\",\"check\":\"c1\",\"indicator\":\"indicator:component:payments@1\",\"subject\":\"component:payments\",\"role\":\"errors\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"anomalous\",\"direction\":\"up\",\"unit\":\"ratio\",\"baseline\":{\"median\":0.0008328,\"spread\":0.0001735},\"peak\":{\"value\":0.4501,\"at\":\"2026-10-17T07:59:35.000Z\",\"z\":2590,\"effectPercent\":53950},\"longestRun\":26,\"onset\":\"2026-10-17T07:59:35.000Z\",\"breachOnset\":null,\"coverage\":1,\"zoom\":null,\"problem\":null},{\"result\":\"r3\",\"kind\":\"indicator\",\"check\":\"c1\",\"indicator\":\"indicator:component:payments@1\",\"subject\":\"component:payments\",\"role\":\"latency\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"anomalous\",\"direction\":\"up\",\"unit\":\"seconds\",\"baseline\":{\"median\":0.2091,\"spread\":0.01442},\"peak\":{\"value\":0.5345,\"at\":\"2026-10-17T07:59:35.000Z\",\"z\":22.57,\"effectPercent\":155.6},\"longestRun\":12,\"onset\":\"2026-10-17T07:59:35.000Z\",\"breachOnset\":null,\"coverage\":1,\"zoom\":null,\"problem\":null},{\"result\":\"r4\",\"kind\":\"indicator\",\"check\":\"c2\",\"indicator\":\"indicator:step:place-order#5@1\",\"subject\":\"step:place-order#5\",\"role\":\"throughput\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"no-data\",\"direction\":null,\"unit\":\"per second\",\"baseline\":null,\"peak\":null,\"longestRun\":0,\"onset\":null,\"breachOnset\":null,\"coverage\":0,\"zoom\":null,\"problem\":null},{\"result\":\"r5\",\"kind\":\"indicator\",\"check\":\"c2\",\"indicator\":\"indicator:step:place-order#5@1\",\"subject\":\"step:place-order#5\",\"role\":\"errors\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"anomalous\",\"direction\":\"up\",\"unit\":\"ratio\",\"baseline\":{\"median\":0.0005,\"spread\":0.000005},\"peak\":{\"value\":0.62,\"at\":\"2026-10-17T07:59:35.000Z\",\"z\":123900,\"effectPercent\":123900},\"longestRun\":26,\"onset\":\"2026-10-17T07:59:35.000Z\",\"breachOnset\":null,\"coverage\":1,\"zoom\":null,\"problem\":null},{\"result\":\"r6\",\"kind\":\"indicator\",\"check\":\"c2\",\"indicator\":\"indicator:step:place-order#5@1\",\"subject\":\"step:place-order#5\",\"role\":\"latency\",\"expectation\":\"baseline\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":null,\"bounds\":null,\"signal\":\"no-data\",\"direction\":null,\"unit\":\"seconds\",\"baseline\":null,\"peak\":null,\"longestRun\":0,\"onset\":null,\"breachOnset\":null,\"coverage\":0,\"zoom\":null,\"problem\":null},{\"result\":\"r7\",\"kind\":\"indicator\",\"check\":\"c9\",\"indicator\":\"indicator:flow:place-order@1\",\"subject\":\"flow:place-order\",\"role\":\"latency\",\"expectation\":\"slo\",\"window\":{\"start\":\"2026-10-17T07:58:00.000Z\",\"end\":\"2026-10-17T08:00:00.000Z\",\"stepSeconds\":1},\"verdict\":\"met\",\"bounds\":\"p99 ≤ 1\",\"signal\":\"anomalous\",\"direction\":\"up\",\"unit\":\"seconds\",\"baseline\":{\"median\":0.1776,\"spread\":0.01092},\"peak\":{\"value\":0.6515,\"at\":\"2026-10-17T07:59:36.000Z\",\"z\":43.41,\"effectPercent\":266.8},\"longestRun\":14,\"onset\":\"2026-10-17T07:59:36.000Z\",\"breachOnset\":null,\"coverage\":1,\"zoom\":null,\"problem\":null}],\"problems\":[]}"
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "name": "check_indicator",
+            "description": "Run any indicator by id (indicator:<subject>@<n>, see describe_vertex), planned or not, over every role it serves. Its subject must be in scope; for a pruned subject, say why in reason.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "indicator": {"type":"string","description":"An indicator id"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned subject"}
+              },
+              "required": ["indicator"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "conclude",
+            "description": "End the investigation. Give a verdict for every result you rely on, cite result ids as evidence, and for a cause propose mitigations in three tiers with their trade-offs. Code checks the conclusion against the results; a rejected one comes back once to be fixed.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "outcome": {"type":"string","enum":["cause-found","no-signal","inconclusive"]},
+                "summary": {"type":"string","description":"Two or three sentences for the engineer"},
+                "cause": {
+                  "type": "object",
+                  "properties": {
+                    "vertex": {
+                      "type": "string",
+                      "description": "The vertex at fault, e.g. component:payment-provider"
+                    },
+                    "mechanism": {"type":"string","description":"What happened there, in one sentence"}
+                  },
+                  "required": ["vertex","mechanism"],
+                  "additionalProperties": false
+                },
+                "origin": {
+                  "type": "object",
+                  "description": "The step the fault starts at, by the origin rule",
+                  "properties": {
+                    "step": {"type":"string"},
+                    "uncertain": {
+                      "type": "boolean",
+                      "description": "True when a step without data could be the origin"
+                    }
+                  },
+                  "required": ["step","uncertain"],
+                  "additionalProperties": false
+                },
+                "verdicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "result": {"type":"string","description":"A result id, e.g. r3"},
+                      "verdict": {"type":"string","enum":["healthy","unhealthy","no-data"]},
+                      "reason": {"type":"string"}
+                    },
+                    "required": ["result","verdict","reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "description": "Result ids the conclusion rests on"
+                },
+                "confidence": {"type":"number"},
+                "mitigations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tier": {"type":"string","enum":["immediate","short-term","prevention"]},
+                      "action": {"type":"string"},
+                      "tradeoff": {"type":"string"}
+                    },
+                    "required": ["tier","action","tradeoff"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["outcome","summary","verdicts","evidence","confidence","mitigations"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "describe_vertex",
+            "description": "Describe one vertex: its properties, its indicators (with ids for check_indicator), its edges, and whether it is in scope.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "get_trace",
+            "description": "Read one trace by id, e.g. a traceId field of a log example, as a redacted span tree: services, operations, durations, statuses and allowlisted attributes.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {"traceId":{"type":"string","description":"A hex trace id"}},
+              "required": ["traceId"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "impact",
+            "description": "What depends on a vertex, up to the flows and functionalities it can break.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "run_checks",
+            "description": "Run planned checks by id (c1, c2, …). An indicator check returns, per role, deviation statistics against the baseline and, for SLO, threshold and nonZero expectations, code's verdict. A logs check returns log templates that are new or surging against the baseline, with redacted examples; a traces check returns the subject's span operations that got slower, are new or fail, with an exemplar trace. Pass a narrower window to zoom in, e.g. from an onset.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "minItems": 1,
+                  "description": "Planned check ids, at most 10 per call"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["checks"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_logs",
+            "description": "Read a component's logs, planned or not: templates that are new, surging or vanished against the baseline, with redacted examples. contains narrows to lines holding a literal text, e.g. a correlation value from another result. Only fields the manifest maps are returned.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "contains": {
+                  "type": "string",
+                  "description": "Optional literal text a line must contain (no regex), at most 100 characters"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_traces",
+            "description": "Read a component's spans, planned or not: its operations (span names) that got slower, are new or fail against the baseline, with an exemplar trace. operation narrows to one span name; errorsOnly reads failed spans only.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "operation": {"type":"string","description":"Optional exact span name"},
+                "errorsOnly": {"type":"boolean","description":"Only spans with an error status"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "subgraph",
+            "description": "The vertices and edges within 1 or 2 hops of a vertex, indicators left out.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                },
+                "hops": {"type":"integer","enum":[1,2]}
+              },
+              "required": ["vertex","hops"],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        ],
+        "toolChoice": {"type":"auto"},
+        "maxTokens": 16000,
+        "reasoning": {"effort":"high"},
+        "fallbackOnRefusal": true,
+        "providerOptions": {"systemCacheControl":{"type":"ephemeral"}}
+      },
+      "response": {
+        "id": "msg_2",
+        "model": "claude-opus-5-5",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call-2",
+            "name": "conclude",
+            "input": {
+              "outcome": "cause-found",
+              "summary": "The fault starts at step:place-order#5.",
+              "cause": {
+                "vertex": "component:payment-provider",
+                "mechanism": "errors at the deepest failing hop"
+              },
+              "origin": {"step":"step:place-order#5","uncertain":false},
+              "verdicts": [
+                {"result":"r1","verdict":"healthy","reason":"throughput normal"},
+                {"result":"r2","verdict":"unhealthy","reason":"errors anomalous"},
+                {"result":"r3","verdict":"unhealthy","reason":"latency anomalous"},
+                {"result":"r4","verdict":"no-data","reason":"throughput no-data"},
+                {"result":"r5","verdict":"unhealthy","reason":"errors anomalous"},
+                {"result":"r6","verdict":"no-data","reason":"latency no-data"},
+                {"result":"r7","verdict":"healthy","reason":"latency met"}
+              ],
+              "evidence": ["r2","r3","r5"],
+              "confidence": 0.8,
+              "mitigations": [
+                {"tier":"immediate","action":"Fail over the provider","tradeoff":"Higher fees"},
+                {
+                  "tier": "short-term",
+                  "action": "Add a circuit breaker",
+                  "tradeoff": "Some fast failures"
+                },
+                {"tier":"prevention","action":"Add a second provider","tradeoff":"Integration cost"}
+              ]
+            }
+          }
+        ],
+        "finishReason": "tool_calls",
+        "usage": {"inputTokens":2000,"outputTokens":300}
+      }
+    }
+  ],
+  "telemetry": [
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_client_request_duration_seconds_bucket{service=\"payments\",http_request_method=\"POST\"}[60s])))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": []
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_client_request_duration_seconds_count{http_response_status_code=~\"5..\",service=\"payments\",http_request_method=\"POST\"}[60s])) / sum(rate(http_client_request_duration_seconds_count{service=\"payments\",http_request_method=\"POST\"}[60s]))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223760000,"value":0.0005},
+            {"timestampMs":1792223761000,"value":0.0005},
+            {"timestampMs":1792223762000,"value":0.0005},
+            {"timestampMs":1792223763000,"value":0.0005},
+            {"timestampMs":1792223764000,"value":0.0005},
+            {"timestampMs":1792223765000,"value":0.0005},
+            {"timestampMs":1792223766000,"value":0.0005},
+            {"timestampMs":1792223767000,"value":0.0005},
+            {"timestampMs":1792223768000,"value":0.0005},
+            {"timestampMs":1792223769000,"value":0.0005},
+            {"timestampMs":1792223770000,"value":0.0005},
+            {"timestampMs":1792223771000,"value":0.0005},
+            {"timestampMs":1792223772000,"value":0.0005},
+            {"timestampMs":1792223773000,"value":0.0005},
+            {"timestampMs":1792223774000,"value":0.0005},
+            {"timestampMs":1792223775000,"value":0.0005},
+            {"timestampMs":1792223776000,"value":0.0005},
+            {"timestampMs":1792223777000,"value":0.0005},
+            {"timestampMs":1792223778000,"value":0.0005},
+            {"timestampMs":1792223779000,"value":0.0005},
+            {"timestampMs":1792223780000,"value":0.0005},
+            {"timestampMs":1792223781000,"value":0.0005},
+            {"timestampMs":1792223782000,"value":0.0005},
+            {"timestampMs":1792223783000,"value":0.0005},
+            {"timestampMs":1792223784000,"value":0.0005},
+            {"timestampMs":1792223785000,"value":0.0005},
+            {"timestampMs":1792223786000,"value":0.0005},
+            {"timestampMs":1792223787000,"value":0.0005},
+            {"timestampMs":1792223788000,"value":0.0005},
+            {"timestampMs":1792223789000,"value":0.0005},
+            {"timestampMs":1792223790000,"value":0.0005},
+            {"timestampMs":1792223791000,"value":0.0005},
+            {"timestampMs":1792223792000,"value":0.0005},
+            {"timestampMs":1792223793000,"value":0.0005},
+            {"timestampMs":1792223794000,"value":0.0005},
+            {"timestampMs":1792223795000,"value":0.0005},
+            {"timestampMs":1792223796000,"value":0.0005},
+            {"timestampMs":1792223797000,"value":0.0005},
+            {"timestampMs":1792223798000,"value":0.0005},
+            {"timestampMs":1792223799000,"value":0.0005},
+            {"timestampMs":1792223800000,"value":0.0005},
+            {"timestampMs":1792223801000,"value":0.0005},
+            {"timestampMs":1792223802000,"value":0.0005},
+            {"timestampMs":1792223803000,"value":0.0005},
+            {"timestampMs":1792223804000,"value":0.0005},
+            {"timestampMs":1792223805000,"value":0.0005},
+            {"timestampMs":1792223806000,"value":0.0005},
+            {"timestampMs":1792223807000,"value":0.0005},
+            {"timestampMs":1792223808000,"value":0.0005},
+            {"timestampMs":1792223809000,"value":0.0005},
+            {"timestampMs":1792223810000,"value":0.0005},
+            {"timestampMs":1792223811000,"value":0.0005},
+            {"timestampMs":1792223812000,"value":0.0005},
+            {"timestampMs":1792223813000,"value":0.0005},
+            {"timestampMs":1792223814000,"value":0.0005},
+            {"timestampMs":1792223815000,"value":0.0005},
+            {"timestampMs":1792223816000,"value":0.0005},
+            {"timestampMs":1792223817000,"value":0.0005},
+            {"timestampMs":1792223818000,"value":0.0005},
+            {"timestampMs":1792223819000,"value":0.0005},
+            {"timestampMs":1792223820000,"value":0.0005},
+            {"timestampMs":1792223821000,"value":0.0005},
+            {"timestampMs":1792223822000,"value":0.0005},
+            {"timestampMs":1792223823000,"value":0.0005},
+            {"timestampMs":1792223824000,"value":0.0005},
+            {"timestampMs":1792223825000,"value":0.0005},
+            {"timestampMs":1792223826000,"value":0.0005},
+            {"timestampMs":1792223827000,"value":0.0005},
+            {"timestampMs":1792223828000,"value":0.0005},
+            {"timestampMs":1792223829000,"value":0.0005},
+            {"timestampMs":1792223830000,"value":0.0005},
+            {"timestampMs":1792223831000,"value":0.0005},
+            {"timestampMs":1792223832000,"value":0.0005},
+            {"timestampMs":1792223833000,"value":0.0005},
+            {"timestampMs":1792223834000,"value":0.0005},
+            {"timestampMs":1792223835000,"value":0.0005},
+            {"timestampMs":1792223836000,"value":0.0005},
+            {"timestampMs":1792223837000,"value":0.0005},
+            {"timestampMs":1792223838000,"value":0.0005},
+            {"timestampMs":1792223839000,"value":0.0005},
+            {"timestampMs":1792223840000,"value":0.0005},
+            {"timestampMs":1792223841000,"value":0.0005},
+            {"timestampMs":1792223842000,"value":0.0005},
+            {"timestampMs":1792223843000,"value":0.0005},
+            {"timestampMs":1792223844000,"value":0.0005},
+            {"timestampMs":1792223845000,"value":0.0005},
+            {"timestampMs":1792223846000,"value":0.0005},
+            {"timestampMs":1792223847000,"value":0.0005},
+            {"timestampMs":1792223848000,"value":0.0005},
+            {"timestampMs":1792223849000,"value":0.0005},
+            {"timestampMs":1792223850000,"value":0.0005},
+            {"timestampMs":1792223851000,"value":0.0005},
+            {"timestampMs":1792223852000,"value":0.0005},
+            {"timestampMs":1792223853000,"value":0.0005},
+            {"timestampMs":1792223854000,"value":0.0005},
+            {"timestampMs":1792223855000,"value":0.0005},
+            {"timestampMs":1792223856000,"value":0.0005},
+            {"timestampMs":1792223857000,"value":0.0005},
+            {"timestampMs":1792223858000,"value":0.0005},
+            {"timestampMs":1792223859000,"value":0.0005},
+            {"timestampMs":1792223860000,"value":0.0005},
+            {"timestampMs":1792223861000,"value":0.0005},
+            {"timestampMs":1792223862000,"value":0.0005},
+            {"timestampMs":1792223863000,"value":0.0005},
+            {"timestampMs":1792223864000,"value":0.0005},
+            {"timestampMs":1792223865000,"value":0.0005},
+            {"timestampMs":1792223866000,"value":0.0005},
+            {"timestampMs":1792223867000,"value":0.0005},
+            {"timestampMs":1792223868000,"value":0.0005},
+            {"timestampMs":1792223869000,"value":0.0005},
+            {"timestampMs":1792223870000,"value":0.0005},
+            {"timestampMs":1792223871000,"value":0.0005},
+            {"timestampMs":1792223872000,"value":0.0005},
+            {"timestampMs":1792223873000,"value":0.0005},
+            {"timestampMs":1792223874000,"value":0.0005},
+            {"timestampMs":1792223875000,"value":0.0005},
+            {"timestampMs":1792223876000,"value":0.0005},
+            {"timestampMs":1792223877000,"value":0.0005},
+            {"timestampMs":1792223878000,"value":0.0005},
+            {"timestampMs":1792223879000,"value":0.0005},
+            {"timestampMs":1792223880000,"value":0.0005}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_client_request_duration_seconds_count{service=\"payments\",http_request_method=\"POST\"}[60s]))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": []
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service=\"checkout\"}[60s])))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"checkout"},
+          "points": [
+            {"timestampMs":1792223760000,"value":0.187039},
+            {"timestampMs":1792223761000,"value":0.174407},
+            {"timestampMs":1792223762000,"value":0.189832},
+            {"timestampMs":1792223763000,"value":0.170244},
+            {"timestampMs":1792223764000,"value":0.169589},
+            {"timestampMs":1792223765000,"value":0.176672},
+            {"timestampMs":1792223766000,"value":0.200635},
+            {"timestampMs":1792223767000,"value":0.188269},
+            {"timestampMs":1792223768000,"value":0.202367},
+            {"timestampMs":1792223769000,"value":0.17341},
+            {"timestampMs":1792223770000,"value":0.174038},
+            {"timestampMs":1792223771000,"value":0.195267},
+            {"timestampMs":1792223772000,"value":0.182709},
+            {"timestampMs":1792223773000,"value":0.174532},
+            {"timestampMs":1792223774000,"value":0.184995},
+            {"timestampMs":1792223775000,"value":0.168975},
+            {"timestampMs":1792223776000,"value":0.178914},
+            {"timestampMs":1792223777000,"value":0.176334},
+            {"timestampMs":1792223778000,"value":0.171151},
+            {"timestampMs":1792223779000,"value":0.173686},
+            {"timestampMs":1792223780000,"value":0.174298},
+            {"timestampMs":1792223781000,"value":0.172714},
+            {"timestampMs":1792223782000,"value":0.196833},
+            {"timestampMs":1792223783000,"value":0.176953},
+            {"timestampMs":1792223784000,"value":0.181783},
+            {"timestampMs":1792223785000,"value":0.206017},
+            {"timestampMs":1792223786000,"value":0.162765},
+            {"timestampMs":1792223787000,"value":0.165391},
+            {"timestampMs":1792223788000,"value":0.172465},
+            {"timestampMs":1792223789000,"value":0.169851},
+            {"timestampMs":1792223790000,"value":0.165734},
+            {"timestampMs":1792223791000,"value":0.1845},
+            {"timestampMs":1792223792000,"value":0.186398},
+            {"timestampMs":1792223793000,"value":0.175761},
+            {"timestampMs":1792223794000,"value":0.186709},
+            {"timestampMs":1792223795000,"value":0.169298},
+            {"timestampMs":1792223796000,"value":0.165223},
+            {"timestampMs":1792223797000,"value":0.20249},
+            {"timestampMs":1792223798000,"value":0.173496},
+            {"timestampMs":1792223799000,"value":0.179065},
+            {"timestampMs":1792223800000,"value":0.176168},
+            {"timestampMs":1792223801000,"value":0.169701},
+            {"timestampMs":1792223802000,"value":0.182896},
+            {"timestampMs":1792223803000,"value":0.19437},
+            {"timestampMs":1792223804000,"value":0.181403},
+            {"timestampMs":1792223805000,"value":0.173029},
+            {"timestampMs":1792223806000,"value":0.169551},
+            {"timestampMs":1792223807000,"value":0.171966},
+            {"timestampMs":1792223808000,"value":0.190164},
+            {"timestampMs":1792223809000,"value":0.173145},
+            {"timestampMs":1792223810000,"value":0.169765},
+            {"timestampMs":1792223811000,"value":0.168417},
+            {"timestampMs":1792223812000,"value":0.169242},
+            {"timestampMs":1792223813000,"value":0.200378},
+            {"timestampMs":1792223814000,"value":0.163435},
+            {"timestampMs":1792223815000,"value":0.162589},
+            {"timestampMs":1792223816000,"value":0.185089},
+            {"timestampMs":1792223817000,"value":0.181162},
+            {"timestampMs":1792223818000,"value":0.192699},
+            {"timestampMs":1792223819000,"value":0.184553},
+            {"timestampMs":1792223820000,"value":0.197415},
+            {"timestampMs":1792223821000,"value":0.173943},
+            {"timestampMs":1792223822000,"value":0.167496},
+            {"timestampMs":1792223823000,"value":0.184294},
+            {"timestampMs":1792223824000,"value":0.180699},
+            {"timestampMs":1792223825000,"value":0.176965},
+            {"timestampMs":1792223826000,"value":0.180241},
+            {"timestampMs":1792223827000,"value":0.201378},
+            {"timestampMs":1792223828000,"value":0.201853},
+            {"timestampMs":1792223829000,"value":0.189779},
+            {"timestampMs":1792223830000,"value":0.177607},
+            {"timestampMs":1792223831000,"value":0.170601},
+            {"timestampMs":1792223832000,"value":0.174752},
+            {"timestampMs":1792223833000,"value":0.180168},
+            {"timestampMs":1792223834000,"value":0.199909},
+            {"timestampMs":1792223835000,"value":0.188588},
+            {"timestampMs":1792223836000,"value":0.168065},
+            {"timestampMs":1792223837000,"value":0.176096},
+            {"timestampMs":1792223838000,"value":0.189134},
+            {"timestampMs":1792223839000,"value":0.17376},
+            {"timestampMs":1792223840000,"value":0.174163},
+            {"timestampMs":1792223841000,"value":0.16666},
+            {"timestampMs":1792223842000,"value":0.182806},
+            {"timestampMs":1792223843000,"value":0.17018},
+            {"timestampMs":1792223844000,"value":0.184092},
+            {"timestampMs":1792223845000,"value":0.191801},
+            {"timestampMs":1792223846000,"value":0.184788},
+            {"timestampMs":1792223847000,"value":0.181366},
+            {"timestampMs":1792223848000,"value":0.182745},
+            {"timestampMs":1792223849000,"value":0.176692},
+            {"timestampMs":1792223850000,"value":0.198667},
+            {"timestampMs":1792223851000,"value":0.203346},
+            {"timestampMs":1792223852000,"value":0.176356},
+            {"timestampMs":1792223853000,"value":0.192542},
+            {"timestampMs":1792223854000,"value":0.181089},
+            {"timestampMs":1792223855000,"value":0.189588},
+            {"timestampMs":1792223856000,"value":0.183511},
+            {"timestampMs":1792223857000,"value":0.15591},
+            {"timestampMs":1792223858000,"value":0.17861},
+            {"timestampMs":1792223859000,"value":0.177889},
+            {"timestampMs":1792223860000,"value":0.173946},
+            {"timestampMs":1792223861000,"value":0.224787},
+            {"timestampMs":1792223862000,"value":0.183347},
+            {"timestampMs":1792223863000,"value":0.167889},
+            {"timestampMs":1792223864000,"value":0.199763},
+            {"timestampMs":1792223865000,"value":0.180769},
+            {"timestampMs":1792223866000,"value":0.157128},
+            {"timestampMs":1792223867000,"value":0.173546},
+            {"timestampMs":1792223868000,"value":0.175446},
+            {"timestampMs":1792223869000,"value":0.171642},
+            {"timestampMs":1792223870000,"value":0.18372},
+            {"timestampMs":1792223871000,"value":0.1848},
+            {"timestampMs":1792223872000,"value":0.190241},
+            {"timestampMs":1792223873000,"value":0.187293},
+            {"timestampMs":1792223874000,"value":0.15873},
+            {"timestampMs":1792223875000,"value":0.157613},
+            {"timestampMs":1792223876000,"value":0.166366},
+            {"timestampMs":1792223877000,"value":0.187018},
+            {"timestampMs":1792223878000,"value":0.1698},
+            {"timestampMs":1792223879000,"value":0.17278},
+            {"timestampMs":1792223880000,"value":0.17514}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service=\"payments\"}[60s])))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223760000,"value":0.20636},
+            {"timestampMs":1792223761000,"value":0.204617},
+            {"timestampMs":1792223762000,"value":0.199312},
+            {"timestampMs":1792223763000,"value":0.195082},
+            {"timestampMs":1792223764000,"value":0.206208},
+            {"timestampMs":1792223765000,"value":0.23622},
+            {"timestampMs":1792223766000,"value":0.214126},
+            {"timestampMs":1792223767000,"value":0.239144},
+            {"timestampMs":1792223768000,"value":0.220015},
+            {"timestampMs":1792223769000,"value":0.201313},
+            {"timestampMs":1792223770000,"value":0.18801},
+            {"timestampMs":1792223771000,"value":0.193708},
+            {"timestampMs":1792223772000,"value":0.233},
+            {"timestampMs":1792223773000,"value":0.207397},
+            {"timestampMs":1792223774000,"value":0.218446},
+            {"timestampMs":1792223775000,"value":0.222045},
+            {"timestampMs":1792223776000,"value":0.227302},
+            {"timestampMs":1792223777000,"value":0.211382},
+            {"timestampMs":1792223778000,"value":0.224642},
+            {"timestampMs":1792223779000,"value":0.192634},
+            {"timestampMs":1792223780000,"value":0.203652},
+            {"timestampMs":1792223781000,"value":0.231825},
+            {"timestampMs":1792223782000,"value":0.182764},
+            {"timestampMs":1792223783000,"value":0.213811},
+            {"timestampMs":1792223784000,"value":0.239856},
+            {"timestampMs":1792223785000,"value":0.179803},
+            {"timestampMs":1792223786000,"value":0.226656},
+            {"timestampMs":1792223787000,"value":0.229059},
+            {"timestampMs":1792223788000,"value":0.171869},
+            {"timestampMs":1792223789000,"value":0.199957},
+            {"timestampMs":1792223790000,"value":0.230572},
+            {"timestampMs":1792223791000,"value":0.217943},
+            {"timestampMs":1792223792000,"value":0.222042},
+            {"timestampMs":1792223793000,"value":0.208097},
+            {"timestampMs":1792223794000,"value":0.209072},
+            {"timestampMs":1792223795000,"value":0.205274},
+            {"timestampMs":1792223796000,"value":0.180931},
+            {"timestampMs":1792223797000,"value":0.202457},
+            {"timestampMs":1792223798000,"value":0.20188},
+            {"timestampMs":1792223799000,"value":0.213938},
+            {"timestampMs":1792223800000,"value":0.211837},
+            {"timestampMs":1792223801000,"value":0.201324},
+            {"timestampMs":1792223802000,"value":0.190267},
+            {"timestampMs":1792223803000,"value":0.201838},
+            {"timestampMs":1792223804000,"value":0.201197},
+            {"timestampMs":1792223805000,"value":0.233821},
+            {"timestampMs":1792223806000,"value":0.182181},
+            {"timestampMs":1792223807000,"value":0.204191},
+            {"timestampMs":1792223808000,"value":0.194063},
+            {"timestampMs":1792223809000,"value":0.211296},
+            {"timestampMs":1792223810000,"value":0.190687},
+            {"timestampMs":1792223811000,"value":0.202267},
+            {"timestampMs":1792223812000,"value":0.207494},
+            {"timestampMs":1792223813000,"value":0.212156},
+            {"timestampMs":1792223814000,"value":0.202899},
+            {"timestampMs":1792223815000,"value":0.219409},
+            {"timestampMs":1792223816000,"value":0.206426},
+            {"timestampMs":1792223817000,"value":0.196181},
+            {"timestampMs":1792223818000,"value":0.251695},
+            {"timestampMs":1792223819000,"value":0.2098},
+            {"timestampMs":1792223820000,"value":0.247136},
+            {"timestampMs":1792223821000,"value":0.221156},
+            {"timestampMs":1792223822000,"value":0.194361},
+            {"timestampMs":1792223823000,"value":0.181333},
+            {"timestampMs":1792223824000,"value":0.212589},
+            {"timestampMs":1792223825000,"value":0.199033},
+            {"timestampMs":1792223826000,"value":0.219045},
+            {"timestampMs":1792223827000,"value":0.189647},
+            {"timestampMs":1792223828000,"value":0.22101},
+            {"timestampMs":1792223829000,"value":0.220379},
+            {"timestampMs":1792223830000,"value":0.198039},
+            {"timestampMs":1792223831000,"value":0.217107},
+            {"timestampMs":1792223832000,"value":0.220735},
+            {"timestampMs":1792223833000,"value":0.188901},
+            {"timestampMs":1792223834000,"value":0.19808},
+            {"timestampMs":1792223835000,"value":0.202534},
+            {"timestampMs":1792223836000,"value":0.214902},
+            {"timestampMs":1792223837000,"value":0.207279},
+            {"timestampMs":1792223838000,"value":0.214121},
+            {"timestampMs":1792223839000,"value":0.235285},
+            {"timestampMs":1792223840000,"value":0.217449},
+            {"timestampMs":1792223841000,"value":0.201902},
+            {"timestampMs":1792223842000,"value":0.189851},
+            {"timestampMs":1792223843000,"value":0.202259},
+            {"timestampMs":1792223844000,"value":0.21995},
+            {"timestampMs":1792223845000,"value":0.214791},
+            {"timestampMs":1792223846000,"value":0.209401},
+            {"timestampMs":1792223847000,"value":0.213646},
+            {"timestampMs":1792223848000,"value":0.237365},
+            {"timestampMs":1792223849000,"value":0.210997},
+            {"timestampMs":1792223850000,"value":0.205794},
+            {"timestampMs":1792223851000,"value":0.218463},
+            {"timestampMs":1792223852000,"value":0.227268},
+            {"timestampMs":1792223853000,"value":0.201412},
+            {"timestampMs":1792223854000,"value":0.223889},
+            {"timestampMs":1792223855000,"value":0.210278},
+            {"timestampMs":1792223856000,"value":0.18038},
+            {"timestampMs":1792223857000,"value":0.210322},
+            {"timestampMs":1792223858000,"value":0.211832},
+            {"timestampMs":1792223859000,"value":0.218638},
+            {"timestampMs":1792223860000,"value":0.196309},
+            {"timestampMs":1792223861000,"value":0.201561},
+            {"timestampMs":1792223862000,"value":0.213408},
+            {"timestampMs":1792223863000,"value":0.205785},
+            {"timestampMs":1792223864000,"value":0.195523},
+            {"timestampMs":1792223865000,"value":0.206318},
+            {"timestampMs":1792223866000,"value":0.22335},
+            {"timestampMs":1792223867000,"value":0.209377},
+            {"timestampMs":1792223868000,"value":0.201366},
+            {"timestampMs":1792223869000,"value":0.202978},
+            {"timestampMs":1792223870000,"value":0.240312},
+            {"timestampMs":1792223871000,"value":0.194079},
+            {"timestampMs":1792223872000,"value":0.209132},
+            {"timestampMs":1792223873000,"value":0.232287},
+            {"timestampMs":1792223874000,"value":0.204385},
+            {"timestampMs":1792223875000,"value":0.218006},
+            {"timestampMs":1792223876000,"value":0.22097},
+            {"timestampMs":1792223877000,"value":0.199346},
+            {"timestampMs":1792223878000,"value":0.198708},
+            {"timestampMs":1792223879000,"value":0.224569},
+            {"timestampMs":1792223880000,"value":0.187832}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\",service=\"payments\"}[60s])) / sum(rate(http_server_request_duration_seconds_count{service=\"payments\"}[60s]))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223760000,"value":0.000672216},
+            {"timestampMs":1792223761000,"value":0.00104685},
+            {"timestampMs":1792223762000,"value":0.0010952},
+            {"timestampMs":1792223763000,"value":0.0005436},
+            {"timestampMs":1792223764000,"value":0.000960791},
+            {"timestampMs":1792223765000,"value":0.000723609},
+            {"timestampMs":1792223766000,"value":0.000710999},
+            {"timestampMs":1792223767000,"value":0.000710166},
+            {"timestampMs":1792223768000,"value":0.0004545},
+            {"timestampMs":1792223769000,"value":0.000804669},
+            {"timestampMs":1792223770000,"value":0.00104632},
+            {"timestampMs":1792223771000,"value":0.000857301},
+            {"timestampMs":1792223772000,"value":0.000597086},
+            {"timestampMs":1792223773000,"value":0.000850194},
+            {"timestampMs":1792223774000,"value":0.000763744},
+            {"timestampMs":1792223775000,"value":0.000949817},
+            {"timestampMs":1792223776000,"value":0.000892409},
+            {"timestampMs":1792223777000,"value":0.000521348},
+            {"timestampMs":1792223778000,"value":0.000961802},
+            {"timestampMs":1792223779000,"value":0.000907454},
+            {"timestampMs":1792223780000,"value":0.000899307},
+            {"timestampMs":1792223781000,"value":0.000853473},
+            {"timestampMs":1792223782000,"value":0.000919055},
+            {"timestampMs":1792223783000,"value":0.00112475},
+            {"timestampMs":1792223784000,"value":0.000490366},
+            {"timestampMs":1792223785000,"value":0.000712568},
+            {"timestampMs":1792223786000,"value":0.00096023},
+            {"timestampMs":1792223787000,"value":0.000799982},
+            {"timestampMs":1792223788000,"value":0.000995246},
+            {"timestampMs":1792223789000,"value":0.000939123},
+            {"timestampMs":1792223790000,"value":0.000945143},
+            {"timestampMs":1792223791000,"value":0.000614946},
+            {"timestampMs":1792223792000,"value":0.000832799},
+            {"timestampMs":1792223793000,"value":0.000988751},
+            {"timestampMs":1792223794000,"value":0.000866603},
+            {"timestampMs":1792223795000,"value":0.000987134},
+            {"timestampMs":1792223796000,"value":0.000920392},
+            {"timestampMs":1792223797000,"value":0.00079957},
+            {"timestampMs":1792223798000,"value":0.000791711},
+            {"timestampMs":1792223799000,"value":0.000637898},
+            {"timestampMs":1792223800000,"value":0.000440697},
+            {"timestampMs":1792223801000,"value":0.000546543},
+            {"timestampMs":1792223802000,"value":0.000834226},
+            {"timestampMs":1792223803000,"value":0.00110973},
+            {"timestampMs":1792223804000,"value":0.000653189},
+            {"timestampMs":1792223805000,"value":0.000849632},
+            {"timestampMs":1792223806000,"value":0.000749554},
+            {"timestampMs":1792223807000,"value":0.00099748},
+            {"timestampMs":1792223808000,"value":0.00086371},
+            {"timestampMs":1792223809000,"value":0.00072689},
+            {"timestampMs":1792223810000,"value":0.000909927},
+            {"timestampMs":1792223811000,"value":0.00086411},
+            {"timestampMs":1792223812000,"value":0.000475752},
+            {"timestampMs":1792223813000,"value":0.000679374},
+            {"timestampMs":1792223814000,"value":0.000977108},
+            {"timestampMs":1792223815000,"value":0.00068326},
+            {"timestampMs":1792223816000,"value":0.000670196},
+            {"timestampMs":1792223817000,"value":0.000824574},
+            {"timestampMs":1792223818000,"value":0.00105566},
+            {"timestampMs":1792223819000,"value":0.000878138},
+            {"timestampMs":1792223820000,"value":0.000932565},
+            {"timestampMs":1792223821000,"value":0.000742545},
+            {"timestampMs":1792223822000,"value":0.000866696},
+            {"timestampMs":1792223823000,"value":0.000749217},
+            {"timestampMs":1792223824000,"value":0.000933783},
+            {"timestampMs":1792223825000,"value":0.000715349},
+            {"timestampMs":1792223826000,"value":0.000971658},
+            {"timestampMs":1792223827000,"value":0.000821513},
+            {"timestampMs":1792223828000,"value":0.000640403},
+            {"timestampMs":1792223829000,"value":0.000725275},
+            {"timestampMs":1792223830000,"value":0.00072672},
+            {"timestampMs":1792223831000,"value":0.00122654},
+            {"timestampMs":1792223832000,"value":0.000524063},
+            {"timestampMs":1792223833000,"value":0.000794469},
+            {"timestampMs":1792223834000,"value":0.00112962},
+            {"timestampMs":1792223835000,"value":0.00107385},
+            {"timestampMs":1792223836000,"value":0.00103475},
+            {"timestampMs":1792223837000,"value":0.000947402},
+            {"timestampMs":1792223838000,"value":0.000928494},
+            {"timestampMs":1792223839000,"value":0.000615612},
+            {"timestampMs":1792223840000,"value":0.000773116},
+            {"timestampMs":1792223841000,"value":0.0010799},
+            {"timestampMs":1792223842000,"value":0.0008941},
+            {"timestampMs":1792223843000,"value":0.000532324},
+            {"timestampMs":1792223844000,"value":0.000922451},
+            {"timestampMs":1792223845000,"value":0.000571373},
+            {"timestampMs":1792223846000,"value":0.000560227},
+            {"timestampMs":1792223847000,"value":0.000893897},
+            {"timestampMs":1792223848000,"value":0.000796037},
+            {"timestampMs":1792223849000,"value":0.000942331},
+            {"timestampMs":1792223850000,"value":0.000724816},
+            {"timestampMs":1792223851000,"value":0.000744368},
+            {"timestampMs":1792223852000,"value":0.000613279},
+            {"timestampMs":1792223853000,"value":0.000609168},
+            {"timestampMs":1792223854000,"value":0.000777835},
+            {"timestampMs":1792223855000,"value":0.000254285},
+            {"timestampMs":1792223856000,"value":0.00079373},
+            {"timestampMs":1792223857000,"value":0.000886261},
+            {"timestampMs":1792223858000,"value":0.000887598},
+            {"timestampMs":1792223859000,"value":0.00121173},
+            {"timestampMs":1792223860000,"value":0.000913971},
+            {"timestampMs":1792223861000,"value":0.000865626},
+            {"timestampMs":1792223862000,"value":0.00071235},
+            {"timestampMs":1792223863000,"value":0.000700335},
+            {"timestampMs":1792223864000,"value":0.00083281},
+            {"timestampMs":1792223865000,"value":0.000314832},
+            {"timestampMs":1792223866000,"value":0.000893444},
+            {"timestampMs":1792223867000,"value":0.000417293},
+            {"timestampMs":1792223868000,"value":0.000880828},
+            {"timestampMs":1792223869000,"value":0.000506169},
+            {"timestampMs":1792223870000,"value":0.00067019},
+            {"timestampMs":1792223871000,"value":0.000898981},
+            {"timestampMs":1792223872000,"value":0.000693626},
+            {"timestampMs":1792223873000,"value":0.000676067},
+            {"timestampMs":1792223874000,"value":0.000994962},
+            {"timestampMs":1792223875000,"value":0.000657908},
+            {"timestampMs":1792223876000,"value":0.000903252},
+            {"timestampMs":1792223877000,"value":0.000897213},
+            {"timestampMs":1792223878000,"value":0.000677059},
+            {"timestampMs":1792223879000,"value":0.000885906},
+            {"timestampMs":1792223880000,"value":0.000899898}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_server_request_duration_seconds_count{service=\"payments\"}[60s]))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {},
+          "points": [
+            {"timestampMs":1792223760000,"value":49.5118},
+            {"timestampMs":1792223761000,"value":53.9637},
+            {"timestampMs":1792223762000,"value":52.5681},
+            {"timestampMs":1792223763000,"value":52.9117},
+            {"timestampMs":1792223764000,"value":49.1252},
+            {"timestampMs":1792223765000,"value":51.0122},
+            {"timestampMs":1792223766000,"value":50.4637},
+            {"timestampMs":1792223767000,"value":53.1148},
+            {"timestampMs":1792223768000,"value":50.4174},
+            {"timestampMs":1792223769000,"value":52.035},
+            {"timestampMs":1792223770000,"value":51.7305},
+            {"timestampMs":1792223771000,"value":51.3117},
+            {"timestampMs":1792223772000,"value":51.8124},
+            {"timestampMs":1792223773000,"value":51.4454},
+            {"timestampMs":1792223774000,"value":52.9738},
+            {"timestampMs":1792223775000,"value":54.602},
+            {"timestampMs":1792223776000,"value":52.9402},
+            {"timestampMs":1792223777000,"value":53.5535},
+            {"timestampMs":1792223778000,"value":51.4974},
+            {"timestampMs":1792223779000,"value":54.3462},
+            {"timestampMs":1792223780000,"value":49.8139},
+            {"timestampMs":1792223781000,"value":51.5558},
+            {"timestampMs":1792223782000,"value":48.7621},
+            {"timestampMs":1792223783000,"value":53.9827},
+            {"timestampMs":1792223784000,"value":50.2791},
+            {"timestampMs":1792223785000,"value":51.9279},
+            {"timestampMs":1792223786000,"value":53.0197},
+            {"timestampMs":1792223787000,"value":50.739},
+            {"timestampMs":1792223788000,"value":54.4932},
+            {"timestampMs":1792223789000,"value":55.5743},
+            {"timestampMs":1792223790000,"value":52.11},
+            {"timestampMs":1792223791000,"value":56.8748},
+            {"timestampMs":1792223792000,"value":52.4049},
+            {"timestampMs":1792223793000,"value":52.4034},
+            {"timestampMs":1792223794000,"value":51.6196},
+            {"timestampMs":1792223795000,"value":49.3501},
+            {"timestampMs":1792223796000,"value":51.7584},
+            {"timestampMs":1792223797000,"value":52.47},
+            {"timestampMs":1792223798000,"value":53.2329},
+            {"timestampMs":1792223799000,"value":53.2088},
+            {"timestampMs":1792223800000,"value":53.6707},
+            {"timestampMs":1792223801000,"value":49.1232},
+            {"timestampMs":1792223802000,"value":53.3297},
+            {"timestampMs":1792223803000,"value":52.3482},
+            {"timestampMs":1792223804000,"value":52.7888},
+            {"timestampMs":1792223805000,"value":54.1605},
+            {"timestampMs":1792223806000,"value":50.0969},
+            {"timestampMs":1792223807000,"value":53.2707},
+            {"timestampMs":1792223808000,"value":51.1068},
+            {"timestampMs":1792223809000,"value":53.0409},
+            {"timestampMs":1792223810000,"value":52.3126},
+            {"timestampMs":1792223811000,"value":50.776},
+            {"timestampMs":1792223812000,"value":50.056},
+            {"timestampMs":1792223813000,"value":54.7147},
+            {"timestampMs":1792223814000,"value":51.8889},
+            {"timestampMs":1792223815000,"value":48.6363},
+            {"timestampMs":1792223816000,"value":54.2759},
+            {"timestampMs":1792223817000,"value":52.9794},
+            {"timestampMs":1792223818000,"value":53.3824},
+            {"timestampMs":1792223819000,"value":53.3136},
+            {"timestampMs":1792223820000,"value":50.7901},
+            {"timestampMs":1792223821000,"value":53.3596},
+            {"timestampMs":1792223822000,"value":53.8735},
+            {"timestampMs":1792223823000,"value":53.0707},
+            {"timestampMs":1792223824000,"value":51.1207},
+            {"timestampMs":1792223825000,"value":51.1233},
+            {"timestampMs":1792223826000,"value":51.0946},
+            {"timestampMs":1792223827000,"value":51.3583},
+            {"timestampMs":1792223828000,"value":51.8616},
+            {"timestampMs":1792223829000,"value":48.6832},
+            {"timestampMs":1792223830000,"value":53.8096},
+            {"timestampMs":1792223831000,"value":50.4756},
+            {"timestampMs":1792223832000,"value":49.9887},
+            {"timestampMs":1792223833000,"value":50.6163},
+            {"timestampMs":1792223834000,"value":51.1668},
+            {"timestampMs":1792223835000,"value":51.5922},
+            {"timestampMs":1792223836000,"value":54.4268},
+            {"timestampMs":1792223837000,"value":54.5942},
+            {"timestampMs":1792223838000,"value":54.0725},
+            {"timestampMs":1792223839000,"value":54.2171},
+            {"timestampMs":1792223840000,"value":52.8953},
+            {"timestampMs":1792223841000,"value":52.1408},
+            {"timestampMs":1792223842000,"value":51.47},
+            {"timestampMs":1792223843000,"value":56.694},
+            {"timestampMs":1792223844000,"value":50.192},
+            {"timestampMs":1792223845000,"value":52.8099},
+            {"timestampMs":1792223846000,"value":53.9728},
+            {"timestampMs":1792223847000,"value":50.1119},
+            {"timestampMs":1792223848000,"value":51.2732},
+            {"timestampMs":1792223849000,"value":52.3336},
+            {"timestampMs":1792223850000,"value":52.8422},
+            {"timestampMs":1792223851000,"value":52.336},
+            {"timestampMs":1792223852000,"value":52.2435},
+            {"timestampMs":1792223853000,"value":51.4618},
+            {"timestampMs":1792223854000,"value":51.6959},
+            {"timestampMs":1792223855000,"value":51.8614},
+            {"timestampMs":1792223856000,"value":51.7413},
+            {"timestampMs":1792223857000,"value":50.9436},
+            {"timestampMs":1792223858000,"value":50.8242},
+            {"timestampMs":1792223859000,"value":53.3006},
+            {"timestampMs":1792223860000,"value":52.4703},
+            {"timestampMs":1792223861000,"value":49.658},
+            {"timestampMs":1792223862000,"value":53.83},
+            {"timestampMs":1792223863000,"value":48.7587},
+            {"timestampMs":1792223864000,"value":49.4259},
+            {"timestampMs":1792223865000,"value":53.8566},
+            {"timestampMs":1792223866000,"value":52.5864},
+            {"timestampMs":1792223867000,"value":48.5031},
+            {"timestampMs":1792223868000,"value":52.9195},
+            {"timestampMs":1792223869000,"value":48.0423},
+            {"timestampMs":1792223870000,"value":48.9711},
+            {"timestampMs":1792223871000,"value":50.2821},
+            {"timestampMs":1792223872000,"value":51.5921},
+            {"timestampMs":1792223873000,"value":52.1371},
+            {"timestampMs":1792223874000,"value":55.3959},
+            {"timestampMs":1792223875000,"value":51.1636},
+            {"timestampMs":1792223876000,"value":54.1339},
+            {"timestampMs":1792223877000,"value":52.0411},
+            {"timestampMs":1792223878000,"value":49.5797},
+            {"timestampMs":1792223879000,"value":48.7085},
+            {"timestampMs":1792223880000,"value":51.2027}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_client_request_duration_seconds_bucket{service=\"payments\",http_request_method=\"POST\"}[60s])))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": []
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_client_request_duration_seconds_count{http_response_status_code=~\"5..\",service=\"payments\",http_request_method=\"POST\"}[60s])) / sum(rate(http_client_request_duration_seconds_count{service=\"payments\",http_request_method=\"POST\"}[60s]))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223880000,"value":0.0005},
+            {"timestampMs":1792223881000,"value":0.0005},
+            {"timestampMs":1792223882000,"value":0.0005},
+            {"timestampMs":1792223883000,"value":0.0005},
+            {"timestampMs":1792223884000,"value":0.0005},
+            {"timestampMs":1792223885000,"value":0.0005},
+            {"timestampMs":1792223886000,"value":0.0005},
+            {"timestampMs":1792223887000,"value":0.0005},
+            {"timestampMs":1792223888000,"value":0.0005},
+            {"timestampMs":1792223889000,"value":0.0005},
+            {"timestampMs":1792223890000,"value":0.0005},
+            {"timestampMs":1792223891000,"value":0.0005},
+            {"timestampMs":1792223892000,"value":0.0005},
+            {"timestampMs":1792223893000,"value":0.0005},
+            {"timestampMs":1792223894000,"value":0.0005},
+            {"timestampMs":1792223895000,"value":0.0005},
+            {"timestampMs":1792223896000,"value":0.0005},
+            {"timestampMs":1792223897000,"value":0.0005},
+            {"timestampMs":1792223898000,"value":0.0005},
+            {"timestampMs":1792223899000,"value":0.0005},
+            {"timestampMs":1792223900000,"value":0.0005},
+            {"timestampMs":1792223901000,"value":0.0005},
+            {"timestampMs":1792223902000,"value":0.0005},
+            {"timestampMs":1792223903000,"value":0.0005},
+            {"timestampMs":1792223904000,"value":0.0005},
+            {"timestampMs":1792223905000,"value":0.0005},
+            {"timestampMs":1792223906000,"value":0.0005},
+            {"timestampMs":1792223907000,"value":0.0005},
+            {"timestampMs":1792223908000,"value":0.0005},
+            {"timestampMs":1792223909000,"value":0.0005},
+            {"timestampMs":1792223910000,"value":0.0005},
+            {"timestampMs":1792223911000,"value":0.0005},
+            {"timestampMs":1792223912000,"value":0.0005},
+            {"timestampMs":1792223913000,"value":0.0005},
+            {"timestampMs":1792223914000,"value":0.0005},
+            {"timestampMs":1792223915000,"value":0.0005},
+            {"timestampMs":1792223916000,"value":0.0005},
+            {"timestampMs":1792223917000,"value":0.0005},
+            {"timestampMs":1792223918000,"value":0.0005},
+            {"timestampMs":1792223919000,"value":0.0005},
+            {"timestampMs":1792223920000,"value":0.0005},
+            {"timestampMs":1792223921000,"value":0.0005},
+            {"timestampMs":1792223922000,"value":0.0005},
+            {"timestampMs":1792223923000,"value":0.0005},
+            {"timestampMs":1792223924000,"value":0.0005},
+            {"timestampMs":1792223925000,"value":0.0005},
+            {"timestampMs":1792223926000,"value":0.0005},
+            {"timestampMs":1792223927000,"value":0.0005},
+            {"timestampMs":1792223928000,"value":0.0005},
+            {"timestampMs":1792223929000,"value":0.0005},
+            {"timestampMs":1792223930000,"value":0.0005},
+            {"timestampMs":1792223931000,"value":0.0005},
+            {"timestampMs":1792223932000,"value":0.0005},
+            {"timestampMs":1792223933000,"value":0.0005},
+            {"timestampMs":1792223934000,"value":0.0005},
+            {"timestampMs":1792223935000,"value":0.0005},
+            {"timestampMs":1792223936000,"value":0.0005},
+            {"timestampMs":1792223937000,"value":0.0005},
+            {"timestampMs":1792223938000,"value":0.0005},
+            {"timestampMs":1792223939000,"value":0.0005},
+            {"timestampMs":1792223940000,"value":0.0005},
+            {"timestampMs":1792223941000,"value":0.0005},
+            {"timestampMs":1792223942000,"value":0.0005},
+            {"timestampMs":1792223943000,"value":0.0005},
+            {"timestampMs":1792223944000,"value":0.0005},
+            {"timestampMs":1792223945000,"value":0.0005},
+            {"timestampMs":1792223946000,"value":0.0005},
+            {"timestampMs":1792223947000,"value":0.0005},
+            {"timestampMs":1792223948000,"value":0.0005},
+            {"timestampMs":1792223949000,"value":0.0005},
+            {"timestampMs":1792223950000,"value":0.0005},
+            {"timestampMs":1792223951000,"value":0.0005},
+            {"timestampMs":1792223952000,"value":0.0005},
+            {"timestampMs":1792223953000,"value":0.0005},
+            {"timestampMs":1792223954000,"value":0.0005},
+            {"timestampMs":1792223955000,"value":0.0005},
+            {"timestampMs":1792223956000,"value":0.0005},
+            {"timestampMs":1792223957000,"value":0.0005},
+            {"timestampMs":1792223958000,"value":0.0005},
+            {"timestampMs":1792223959000,"value":0.0005},
+            {"timestampMs":1792223960000,"value":0.0005},
+            {"timestampMs":1792223961000,"value":0.0005},
+            {"timestampMs":1792223962000,"value":0.0005},
+            {"timestampMs":1792223963000,"value":0.0005},
+            {"timestampMs":1792223964000,"value":0.0005},
+            {"timestampMs":1792223965000,"value":0.0005},
+            {"timestampMs":1792223966000,"value":0.0005},
+            {"timestampMs":1792223967000,"value":0.0005},
+            {"timestampMs":1792223968000,"value":0.0005},
+            {"timestampMs":1792223969000,"value":0.0005},
+            {"timestampMs":1792223970000,"value":0.0005},
+            {"timestampMs":1792223971000,"value":0.0005},
+            {"timestampMs":1792223972000,"value":0.0005},
+            {"timestampMs":1792223973000,"value":0.0005},
+            {"timestampMs":1792223974000,"value":0.0005},
+            {"timestampMs":1792223975000,"value":0.62},
+            {"timestampMs":1792223976000,"value":0.524895},
+            {"timestampMs":1792223977000,"value":0.444391},
+            {"timestampMs":1792223978000,"value":0.376246},
+            {"timestampMs":1792223979000,"value":0.318562},
+            {"timestampMs":1792223980000,"value":0.269734},
+            {"timestampMs":1792223981000,"value":0.228401},
+            {"timestampMs":1792223982000,"value":0.193414},
+            {"timestampMs":1792223983000,"value":0.163798},
+            {"timestampMs":1792223984000,"value":0.138729},
+            {"timestampMs":1792223985000,"value":0.117508},
+            {"timestampMs":1792223986000,"value":0.0995455},
+            {"timestampMs":1792223987000,"value":0.0843402},
+            {"timestampMs":1792223988000,"value":0.0714692},
+            {"timestampMs":1792223989000,"value":0.0605741},
+            {"timestampMs":1792223990000,"value":0.0513517},
+            {"timestampMs":1792223991000,"value":0.043545},
+            {"timestampMs":1792223992000,"value":0.0369368},
+            {"timestampMs":1792223993000,"value":0.0313431},
+            {"timestampMs":1792223994000,"value":0.0266081},
+            {"timestampMs":1792223995000,"value":0.0226},
+            {"timestampMs":1792223996000,"value":0.0192073},
+            {"timestampMs":1792223997000,"value":0.0163354},
+            {"timestampMs":1792223998000,"value":0.0139044},
+            {"timestampMs":1792223999000,"value":0.0118465},
+            {"timestampMs":1792224000000,"value":0.0101046}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_client_request_duration_seconds_count{service=\"payments\",http_request_method=\"POST\"}[60s]))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": []
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service=\"checkout\"}[60s])))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"checkout"},
+          "points": [
+            {"timestampMs":1792223880000,"value":0.17514},
+            {"timestampMs":1792223881000,"value":0.168297},
+            {"timestampMs":1792223882000,"value":0.165645},
+            {"timestampMs":1792223883000,"value":0.171889},
+            {"timestampMs":1792223884000,"value":0.171166},
+            {"timestampMs":1792223885000,"value":0.194467},
+            {"timestampMs":1792223886000,"value":0.18458},
+            {"timestampMs":1792223887000,"value":0.181582},
+            {"timestampMs":1792223888000,"value":0.188116},
+            {"timestampMs":1792223889000,"value":0.181693},
+            {"timestampMs":1792223890000,"value":0.195152},
+            {"timestampMs":1792223891000,"value":0.192721},
+            {"timestampMs":1792223892000,"value":0.16432},
+            {"timestampMs":1792223893000,"value":0.179163},
+            {"timestampMs":1792223894000,"value":0.197795},
+            {"timestampMs":1792223895000,"value":0.173487},
+            {"timestampMs":1792223896000,"value":0.180586},
+            {"timestampMs":1792223897000,"value":0.185838},
+            {"timestampMs":1792223898000,"value":0.165002},
+            {"timestampMs":1792223899000,"value":0.181809},
+            {"timestampMs":1792223900000,"value":0.159601},
+            {"timestampMs":1792223901000,"value":0.169464},
+            {"timestampMs":1792223902000,"value":0.192712},
+            {"timestampMs":1792223903000,"value":0.187175},
+            {"timestampMs":1792223904000,"value":0.176521},
+            {"timestampMs":1792223905000,"value":0.168253},
+            {"timestampMs":1792223906000,"value":0.193515},
+            {"timestampMs":1792223907000,"value":0.189312},
+            {"timestampMs":1792223908000,"value":0.176166},
+            {"timestampMs":1792223909000,"value":0.182572},
+            {"timestampMs":1792223910000,"value":0.174067},
+            {"timestampMs":1792223911000,"value":0.172522},
+            {"timestampMs":1792223912000,"value":0.179168},
+            {"timestampMs":1792223913000,"value":0.1858},
+            {"timestampMs":1792223914000,"value":0.198547},
+            {"timestampMs":1792223915000,"value":0.180396},
+            {"timestampMs":1792223916000,"value":0.167108},
+            {"timestampMs":1792223917000,"value":0.165211},
+            {"timestampMs":1792223918000,"value":0.194397},
+            {"timestampMs":1792223919000,"value":0.171772},
+            {"timestampMs":1792223920000,"value":0.175738},
+            {"timestampMs":1792223921000,"value":0.158851},
+            {"timestampMs":1792223922000,"value":0.18717},
+            {"timestampMs":1792223923000,"value":0.186144},
+            {"timestampMs":1792223924000,"value":0.202251},
+            {"timestampMs":1792223925000,"value":0.176284},
+            {"timestampMs":1792223926000,"value":0.194492},
+            {"timestampMs":1792223927000,"value":0.187114},
+            {"timestampMs":1792223928000,"value":0.192785},
+            {"timestampMs":1792223929000,"value":0.196358},
+            {"timestampMs":1792223930000,"value":0.18912},
+            {"timestampMs":1792223931000,"value":0.184872},
+            {"timestampMs":1792223932000,"value":0.186351},
+            {"timestampMs":1792223933000,"value":0.183546},
+            {"timestampMs":1792223934000,"value":0.182143},
+            {"timestampMs":1792223935000,"value":0.181412},
+            {"timestampMs":1792223936000,"value":0.167053},
+            {"timestampMs":1792223937000,"value":0.16963},
+            {"timestampMs":1792223938000,"value":0.203534},
+            {"timestampMs":1792223939000,"value":0.149773},
+            {"timestampMs":1792223940000,"value":0.180324},
+            {"timestampMs":1792223941000,"value":0.198315},
+            {"timestampMs":1792223942000,"value":0.168351},
+            {"timestampMs":1792223943000,"value":0.176379},
+            {"timestampMs":1792223944000,"value":0.182013},
+            {"timestampMs":1792223945000,"value":0.176188},
+            {"timestampMs":1792223946000,"value":0.175149},
+            {"timestampMs":1792223947000,"value":0.180665},
+            {"timestampMs":1792223948000,"value":0.193005},
+            {"timestampMs":1792223949000,"value":0.181092},
+            {"timestampMs":1792223950000,"value":0.181065},
+            {"timestampMs":1792223951000,"value":0.162051},
+            {"timestampMs":1792223952000,"value":0.18047},
+            {"timestampMs":1792223953000,"value":0.155698},
+            {"timestampMs":1792223954000,"value":0.167045},
+            {"timestampMs":1792223955000,"value":0.187635},
+            {"timestampMs":1792223956000,"value":0.165812},
+            {"timestampMs":1792223957000,"value":0.176354},
+            {"timestampMs":1792223958000,"value":0.177589},
+            {"timestampMs":1792223959000,"value":0.179461},
+            {"timestampMs":1792223960000,"value":0.190832},
+            {"timestampMs":1792223961000,"value":0.179013},
+            {"timestampMs":1792223962000,"value":0.180137},
+            {"timestampMs":1792223963000,"value":0.172061},
+            {"timestampMs":1792223964000,"value":0.170053},
+            {"timestampMs":1792223965000,"value":0.172876},
+            {"timestampMs":1792223966000,"value":0.182351},
+            {"timestampMs":1792223967000,"value":0.176096},
+            {"timestampMs":1792223968000,"value":0.197598},
+            {"timestampMs":1792223969000,"value":0.166782},
+            {"timestampMs":1792223970000,"value":0.170043},
+            {"timestampMs":1792223971000,"value":0.179925},
+            {"timestampMs":1792223972000,"value":0.152433},
+            {"timestampMs":1792223973000,"value":0.16692},
+            {"timestampMs":1792223974000,"value":0.204539},
+            {"timestampMs":1792223975000,"value":0.182799},
+            {"timestampMs":1792223976000,"value":0.651509},
+            {"timestampMs":1792223977000,"value":0.543494},
+            {"timestampMs":1792223978000,"value":0.493346},
+            {"timestampMs":1792223979000,"value":0.470298},
+            {"timestampMs":1792223980000,"value":0.42428},
+            {"timestampMs":1792223981000,"value":0.401637},
+            {"timestampMs":1792223982000,"value":0.390125},
+            {"timestampMs":1792223983000,"value":0.331922},
+            {"timestampMs":1792223984000,"value":0.295972},
+            {"timestampMs":1792223985000,"value":0.280837},
+            {"timestampMs":1792223986000,"value":0.289027},
+            {"timestampMs":1792223987000,"value":0.275923},
+            {"timestampMs":1792223988000,"value":0.260718},
+            {"timestampMs":1792223989000,"value":0.266548},
+            {"timestampMs":1792223990000,"value":0.212095},
+            {"timestampMs":1792223991000,"value":0.214097},
+            {"timestampMs":1792223992000,"value":0.23619},
+            {"timestampMs":1792223993000,"value":0.224003},
+            {"timestampMs":1792223994000,"value":0.19879},
+            {"timestampMs":1792223995000,"value":0.200159},
+            {"timestampMs":1792223996000,"value":0.193592},
+            {"timestampMs":1792223997000,"value":0.200349},
+            {"timestampMs":1792223998000,"value":0.196788},
+            {"timestampMs":1792223999000,"value":0.207707},
+            {"timestampMs":1792224000000,"value":0.183918}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service=\"payments\"}[60s])))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223880000,"value":0.187832},
+            {"timestampMs":1792223881000,"value":0.219247},
+            {"timestampMs":1792223882000,"value":0.214085},
+            {"timestampMs":1792223883000,"value":0.217333},
+            {"timestampMs":1792223884000,"value":0.20861},
+            {"timestampMs":1792223885000,"value":0.223563},
+            {"timestampMs":1792223886000,"value":0.214726},
+            {"timestampMs":1792223887000,"value":0.193911},
+            {"timestampMs":1792223888000,"value":0.217175},
+            {"timestampMs":1792223889000,"value":0.2057},
+            {"timestampMs":1792223890000,"value":0.193042},
+            {"timestampMs":1792223891000,"value":0.201248},
+            {"timestampMs":1792223892000,"value":0.196323},
+            {"timestampMs":1792223893000,"value":0.200438},
+            {"timestampMs":1792223894000,"value":0.208678},
+            {"timestampMs":1792223895000,"value":0.180794},
+            {"timestampMs":1792223896000,"value":0.246531},
+            {"timestampMs":1792223897000,"value":0.219419},
+            {"timestampMs":1792223898000,"value":0.238122},
+            {"timestampMs":1792223899000,"value":0.225533},
+            {"timestampMs":1792223900000,"value":0.205197},
+            {"timestampMs":1792223901000,"value":0.206151},
+            {"timestampMs":1792223902000,"value":0.236744},
+            {"timestampMs":1792223903000,"value":0.211799},
+            {"timestampMs":1792223904000,"value":0.192546},
+            {"timestampMs":1792223905000,"value":0.213959},
+            {"timestampMs":1792223906000,"value":0.206978},
+            {"timestampMs":1792223907000,"value":0.213486},
+            {"timestampMs":1792223908000,"value":0.238347},
+            {"timestampMs":1792223909000,"value":0.191384},
+            {"timestampMs":1792223910000,"value":0.197089},
+            {"timestampMs":1792223911000,"value":0.207754},
+            {"timestampMs":1792223912000,"value":0.200606},
+            {"timestampMs":1792223913000,"value":0.210516},
+            {"timestampMs":1792223914000,"value":0.213105},
+            {"timestampMs":1792223915000,"value":0.224772},
+            {"timestampMs":1792223916000,"value":0.226476},
+            {"timestampMs":1792223917000,"value":0.208669},
+            {"timestampMs":1792223918000,"value":0.216963},
+            {"timestampMs":1792223919000,"value":0.217729},
+            {"timestampMs":1792223920000,"value":0.218217},
+            {"timestampMs":1792223921000,"value":0.205632},
+            {"timestampMs":1792223922000,"value":0.218762},
+            {"timestampMs":1792223923000,"value":0.225355},
+            {"timestampMs":1792223924000,"value":0.222227},
+            {"timestampMs":1792223925000,"value":0.229274},
+            {"timestampMs":1792223926000,"value":0.218195},
+            {"timestampMs":1792223927000,"value":0.227261},
+            {"timestampMs":1792223928000,"value":0.20425},
+            {"timestampMs":1792223929000,"value":0.20001},
+            {"timestampMs":1792223930000,"value":0.20111},
+            {"timestampMs":1792223931000,"value":0.224474},
+            {"timestampMs":1792223932000,"value":0.202388},
+            {"timestampMs":1792223933000,"value":0.204532},
+            {"timestampMs":1792223934000,"value":0.198348},
+            {"timestampMs":1792223935000,"value":0.195453},
+            {"timestampMs":1792223936000,"value":0.231266},
+            {"timestampMs":1792223937000,"value":0.217564},
+            {"timestampMs":1792223938000,"value":0.217907},
+            {"timestampMs":1792223939000,"value":0.230122},
+            {"timestampMs":1792223940000,"value":0.185875},
+            {"timestampMs":1792223941000,"value":0.221262},
+            {"timestampMs":1792223942000,"value":0.219558},
+            {"timestampMs":1792223943000,"value":0.174991},
+            {"timestampMs":1792223944000,"value":0.179618},
+            {"timestampMs":1792223945000,"value":0.217116},
+            {"timestampMs":1792223946000,"value":0.212724},
+            {"timestampMs":1792223947000,"value":0.221352},
+            {"timestampMs":1792223948000,"value":0.221823},
+            {"timestampMs":1792223949000,"value":0.224348},
+            {"timestampMs":1792223950000,"value":0.209632},
+            {"timestampMs":1792223951000,"value":0.195049},
+            {"timestampMs":1792223952000,"value":0.2215},
+            {"timestampMs":1792223953000,"value":0.231823},
+            {"timestampMs":1792223954000,"value":0.233349},
+            {"timestampMs":1792223955000,"value":0.204015},
+            {"timestampMs":1792223956000,"value":0.213334},
+            {"timestampMs":1792223957000,"value":0.224558},
+            {"timestampMs":1792223958000,"value":0.195566},
+            {"timestampMs":1792223959000,"value":0.217932},
+            {"timestampMs":1792223960000,"value":0.201219},
+            {"timestampMs":1792223961000,"value":0.202391},
+            {"timestampMs":1792223962000,"value":0.203311},
+            {"timestampMs":1792223963000,"value":0.20358},
+            {"timestampMs":1792223964000,"value":0.195074},
+            {"timestampMs":1792223965000,"value":0.232883},
+            {"timestampMs":1792223966000,"value":0.207844},
+            {"timestampMs":1792223967000,"value":0.216449},
+            {"timestampMs":1792223968000,"value":0.218056},
+            {"timestampMs":1792223969000,"value":0.21895},
+            {"timestampMs":1792223970000,"value":0.199583},
+            {"timestampMs":1792223971000,"value":0.202763},
+            {"timestampMs":1792223972000,"value":0.204627},
+            {"timestampMs":1792223973000,"value":0.20249},
+            {"timestampMs":1792223974000,"value":0.194314},
+            {"timestampMs":1792223975000,"value":0.534481},
+            {"timestampMs":1792223976000,"value":0.496806},
+            {"timestampMs":1792223977000,"value":0.468771},
+            {"timestampMs":1792223978000,"value":0.446832},
+            {"timestampMs":1792223979000,"value":0.40641},
+            {"timestampMs":1792223980000,"value":0.375869},
+            {"timestampMs":1792223981000,"value":0.327169},
+            {"timestampMs":1792223982000,"value":0.30214},
+            {"timestampMs":1792223983000,"value":0.315942},
+            {"timestampMs":1792223984000,"value":0.33644},
+            {"timestampMs":1792223985000,"value":0.291553},
+            {"timestampMs":1792223986000,"value":0.276449},
+            {"timestampMs":1792223987000,"value":0.258188},
+            {"timestampMs":1792223988000,"value":0.260488},
+            {"timestampMs":1792223989000,"value":0.24161},
+            {"timestampMs":1792223990000,"value":0.25696},
+            {"timestampMs":1792223991000,"value":0.241534},
+            {"timestampMs":1792223992000,"value":0.240541},
+            {"timestampMs":1792223993000,"value":0.198596},
+            {"timestampMs":1792223994000,"value":0.222106},
+            {"timestampMs":1792223995000,"value":0.214855},
+            {"timestampMs":1792223996000,"value":0.215559},
+            {"timestampMs":1792223997000,"value":0.258999},
+            {"timestampMs":1792223998000,"value":0.216778},
+            {"timestampMs":1792223999000,"value":0.230343},
+            {"timestampMs":1792224000000,"value":0.241055}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\",service=\"payments\"}[60s])) / sum(rate(http_server_request_duration_seconds_count{service=\"payments\"}[60s]))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {"service":"payments"},
+          "points": [
+            {"timestampMs":1792223880000,"value":0.000899898},
+            {"timestampMs":1792223881000,"value":0.000717363},
+            {"timestampMs":1792223882000,"value":0.00040854},
+            {"timestampMs":1792223883000,"value":0.000901203},
+            {"timestampMs":1792223884000,"value":0.000953198},
+            {"timestampMs":1792223885000,"value":0.000806829},
+            {"timestampMs":1792223886000,"value":0.00101609},
+            {"timestampMs":1792223887000,"value":0.000556346},
+            {"timestampMs":1792223888000,"value":0.000497901},
+            {"timestampMs":1792223889000,"value":0.000836944},
+            {"timestampMs":1792223890000,"value":0.000871177},
+            {"timestampMs":1792223891000,"value":0.00056191},
+            {"timestampMs":1792223892000,"value":0.000671208},
+            {"timestampMs":1792223893000,"value":0.000889213},
+            {"timestampMs":1792223894000,"value":0.000809996},
+            {"timestampMs":1792223895000,"value":0.000785341},
+            {"timestampMs":1792223896000,"value":0.000417123},
+            {"timestampMs":1792223897000,"value":0.000892988},
+            {"timestampMs":1792223898000,"value":0.00137543},
+            {"timestampMs":1792223899000,"value":0.000755905},
+            {"timestampMs":1792223900000,"value":0.000650035},
+            {"timestampMs":1792223901000,"value":0.00078675},
+            {"timestampMs":1792223902000,"value":0.00121493},
+            {"timestampMs":1792223903000,"value":0.000672896},
+            {"timestampMs":1792223904000,"value":0.000740046},
+            {"timestampMs":1792223905000,"value":0.00104157},
+            {"timestampMs":1792223906000,"value":0.000687389},
+            {"timestampMs":1792223907000,"value":0.000415382},
+            {"timestampMs":1792223908000,"value":0.00127885},
+            {"timestampMs":1792223909000,"value":0.00110453},
+            {"timestampMs":1792223910000,"value":0.000968869},
+            {"timestampMs":1792223911000,"value":0.000488628},
+            {"timestampMs":1792223912000,"value":0.00087586},
+            {"timestampMs":1792223913000,"value":0.00115397},
+            {"timestampMs":1792223914000,"value":0.00104399},
+            {"timestampMs":1792223915000,"value":0.000880918},
+            {"timestampMs":1792223916000,"value":0.000550259},
+            {"timestampMs":1792223917000,"value":0.00119707},
+            {"timestampMs":1792223918000,"value":0.000733418},
+            {"timestampMs":1792223919000,"value":0.000671597},
+            {"timestampMs":1792223920000,"value":0.000943954},
+            {"timestampMs":1792223921000,"value":0.000751874},
+            {"timestampMs":1792223922000,"value":0.000861099},
+            {"timestampMs":1792223923000,"value":0.000546274},
+            {"timestampMs":1792223924000,"value":0.00106481},
+            {"timestampMs":1792223925000,"value":0.000852664},
+            {"timestampMs":1792223926000,"value":0.000585699},
+            {"timestampMs":1792223927000,"value":0.000765957},
+            {"timestampMs":1792223928000,"value":0.000698453},
+            {"timestampMs":1792223929000,"value":0.00080265},
+            {"timestampMs":1792223930000,"value":0.000788898},
+            {"timestampMs":1792223931000,"value":0.000911521},
+            {"timestampMs":1792223932000,"value":0.000790726},
+            {"timestampMs":1792223933000,"value":0.00101659},
+            {"timestampMs":1792223934000,"value":0.00110624},
+            {"timestampMs":1792223935000,"value":0.00100542},
+            {"timestampMs":1792223936000,"value":0.000872858},
+            {"timestampMs":1792223937000,"value":0.000864328},
+            {"timestampMs":1792223938000,"value":0.000669732},
+            {"timestampMs":1792223939000,"value":0.000464542},
+            {"timestampMs":1792223940000,"value":0.00109332},
+            {"timestampMs":1792223941000,"value":0.000442222},
+            {"timestampMs":1792223942000,"value":0.000548938},
+            {"timestampMs":1792223943000,"value":0.000845793},
+            {"timestampMs":1792223944000,"value":0.000681416},
+            {"timestampMs":1792223945000,"value":0.000922722},
+            {"timestampMs":1792223946000,"value":0.000803383},
+            {"timestampMs":1792223947000,"value":0.00107167},
+            {"timestampMs":1792223948000,"value":0.00102334},
+            {"timestampMs":1792223949000,"value":0.000894},
+            {"timestampMs":1792223950000,"value":0.000984271},
+            {"timestampMs":1792223951000,"value":0.000899574},
+            {"timestampMs":1792223952000,"value":0.000572685},
+            {"timestampMs":1792223953000,"value":0.000997104},
+            {"timestampMs":1792223954000,"value":0.00105349},
+            {"timestampMs":1792223955000,"value":0.000767054},
+            {"timestampMs":1792223956000,"value":0.000569161},
+            {"timestampMs":1792223957000,"value":0.000645552},
+            {"timestampMs":1792223958000,"value":0.00105502},
+            {"timestampMs":1792223959000,"value":0.000815881},
+            {"timestampMs":1792223960000,"value":0.000284124},
+            {"timestampMs":1792223961000,"value":0.000439737},
+            {"timestampMs":1792223962000,"value":0.000609043},
+            {"timestampMs":1792223963000,"value":0.000872847},
+            {"timestampMs":1792223964000,"value":0.00065717},
+            {"timestampMs":1792223965000,"value":0.000707587},
+            {"timestampMs":1792223966000,"value":0.0009055},
+            {"timestampMs":1792223967000,"value":0.000779252},
+            {"timestampMs":1792223968000,"value":0.000768598},
+            {"timestampMs":1792223969000,"value":0.000881566},
+            {"timestampMs":1792223970000,"value":0.000968312},
+            {"timestampMs":1792223971000,"value":0.00101944},
+            {"timestampMs":1792223972000,"value":0.000634292},
+            {"timestampMs":1792223973000,"value":0.000855125},
+            {"timestampMs":1792223974000,"value":0.00078829},
+            {"timestampMs":1792223975000,"value":0.450128},
+            {"timestampMs":1792223976000,"value":0.38723},
+            {"timestampMs":1792223977000,"value":0.333496},
+            {"timestampMs":1792223978000,"value":0.287322},
+            {"timestampMs":1792223979000,"value":0.24712},
+            {"timestampMs":1792223980000,"value":0.213178},
+            {"timestampMs":1792223981000,"value":0.183602},
+            {"timestampMs":1792223982000,"value":0.158075},
+            {"timestampMs":1792223983000,"value":0.136039},
+            {"timestampMs":1792223984000,"value":0.117141},
+            {"timestampMs":1792223985000,"value":0.101054},
+            {"timestampMs":1792223986000,"value":0.0870772},
+            {"timestampMs":1792223987000,"value":0.0749395},
+            {"timestampMs":1792223988000,"value":0.0645582},
+            {"timestampMs":1792223989000,"value":0.055859},
+            {"timestampMs":1792223990000,"value":0.0481319},
+            {"timestampMs":1792223991000,"value":0.0415407},
+            {"timestampMs":1792223992000,"value":0.0359846},
+            {"timestampMs":1792223993000,"value":0.0314098},
+            {"timestampMs":1792223994000,"value":0.0265232},
+            {"timestampMs":1792223995000,"value":0.023035},
+            {"timestampMs":1792223996000,"value":0.0201946},
+            {"timestampMs":1792223997000,"value":0.017464},
+            {"timestampMs":1792223998000,"value":0.0153127},
+            {"timestampMs":1792223999000,"value":0.0133352},
+            {"timestampMs":1792224000000,"value":0.0113562}
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_server_request_duration_seconds_count{service=\"payments\"}[60s]))",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T08:00:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_route","http_request_method","http_response_status_code","service"]
+      },
+      "result": [
+        {
+          "labels": {},
+          "points": [
+            {"timestampMs":1792223880000,"value":51.2027},
+            {"timestampMs":1792223881000,"value":53.4316},
+            {"timestampMs":1792223882000,"value":51.2438},
+            {"timestampMs":1792223883000,"value":50.9634},
+            {"timestampMs":1792223884000,"value":54.385},
+            {"timestampMs":1792223885000,"value":52.5696},
+            {"timestampMs":1792223886000,"value":55.1001},
+            {"timestampMs":1792223887000,"value":47.9111},
+            {"timestampMs":1792223888000,"value":55.6922},
+            {"timestampMs":1792223889000,"value":49.5232},
+            {"timestampMs":1792223890000,"value":53.9001},
+            {"timestampMs":1792223891000,"value":55.6331},
+            {"timestampMs":1792223892000,"value":52.0063},
+            {"timestampMs":1792223893000,"value":51.492},
+            {"timestampMs":1792223894000,"value":49.0311},
+            {"timestampMs":1792223895000,"value":51.2964},
+            {"timestampMs":1792223896000,"value":54.0973},
+            {"timestampMs":1792223897000,"value":52.5496},
+            {"timestampMs":1792223898000,"value":52.9173},
+            {"timestampMs":1792223899000,"value":52.1074},
+            {"timestampMs":1792223900000,"value":50.5009},
+            {"timestampMs":1792223901000,"value":52.7546},
+            {"timestampMs":1792223902000,"value":54.6405},
+            {"timestampMs":1792223903000,"value":54.3649},
+            {"timestampMs":1792223904000,"value":53.0386},
+            {"timestampMs":1792223905000,"value":51.6805},
+            {"timestampMs":1792223906000,"value":53.1963},
+            {"timestampMs":1792223907000,"value":50.499},
+            {"timestampMs":1792223908000,"value":53.2233},
+            {"timestampMs":1792223909000,"value":53.0429},
+            {"timestampMs":1792223910000,"value":51.5481},
+            {"timestampMs":1792223911000,"value":49.7455},
+            {"timestampMs":1792223912000,"value":53.8275},
+            {"timestampMs":1792223913000,"value":54.2967},
+            {"timestampMs":1792223914000,"value":50.9257},
+            {"timestampMs":1792223915000,"value":52.5977},
+            {"timestampMs":1792223916000,"value":50.3772},
+            {"timestampMs":1792223917000,"value":48.7259},
+            {"timestampMs":1792223918000,"value":55.2902},
+            {"timestampMs":1792223919000,"value":52.2792},
+            {"timestampMs":1792223920000,"value":50.7335},
+            {"timestampMs":1792223921000,"value":51.5713},
+            {"timestampMs":1792223922000,"value":55.2442},
+            {"timestampMs":1792223923000,"value":53.693},
+            {"timestampMs":1792223924000,"value":53.229},
+            {"timestampMs":1792223925000,"value":49.8684},
+            {"timestampMs":1792223926000,"value":52.3892},
+            {"timestampMs":1792223927000,"value":50.4572},
+            {"timestampMs":1792223928000,"value":51.926},
+            {"timestampMs":1792223929000,"value":52.4279},
+            {"timestampMs":1792223930000,"value":49.8444},
+            {"timestampMs":1792223931000,"value":51.7574},
+            {"timestampMs":1792223932000,"value":51.1107},
+            {"timestampMs":1792223933000,"value":52.3221},
+            {"timestampMs":1792223934000,"value":53.2787},
+            {"timestampMs":1792223935000,"value":51.8076},
+            {"timestampMs":1792223936000,"value":52.0136},
+            {"timestampMs":1792223937000,"value":52.6571},
+            {"timestampMs":1792223938000,"value":51.8081},
+            {"timestampMs":1792223939000,"value":52.4825},
+            {"timestampMs":1792223940000,"value":52.9329},
+            {"timestampMs":1792223941000,"value":51.19},
+            {"timestampMs":1792223942000,"value":53.9364},
+            {"timestampMs":1792223943000,"value":54.2295},
+            {"timestampMs":1792223944000,"value":50.2339},
+            {"timestampMs":1792223945000,"value":53.6254},
+            {"timestampMs":1792223946000,"value":52.5357},
+            {"timestampMs":1792223947000,"value":53.4827},
+            {"timestampMs":1792223948000,"value":51.5355},
+            {"timestampMs":1792223949000,"value":49.8437},
+            {"timestampMs":1792223950000,"value":51.4497},
+            {"timestampMs":1792223951000,"value":53.0516},
+            {"timestampMs":1792223952000,"value":52.2045},
+            {"timestampMs":1792223953000,"value":54.2608},
+            {"timestampMs":1792223954000,"value":49.0362},
+            {"timestampMs":1792223955000,"value":50.0634},
+            {"timestampMs":1792223956000,"value":51.309},
+            {"timestampMs":1792223957000,"value":50.9065},
+            {"timestampMs":1792223958000,"value":54.3641},
+            {"timestampMs":1792223959000,"value":53.1035},
+            {"timestampMs":1792223960000,"value":49.1745},
+            {"timestampMs":1792223961000,"value":50.8469},
+            {"timestampMs":1792223962000,"value":54.944},
+            {"timestampMs":1792223963000,"value":49.7545},
+            {"timestampMs":1792223964000,"value":52.7975},
+            {"timestampMs":1792223965000,"value":50.6708},
+            {"timestampMs":1792223966000,"value":51.105},
+            {"timestampMs":1792223967000,"value":54.15},
+            {"timestampMs":1792223968000,"value":52.8339},
+            {"timestampMs":1792223969000,"value":56.8484},
+            {"timestampMs":1792223970000,"value":50.2853},
+            {"timestampMs":1792223971000,"value":50.7598},
+            {"timestampMs":1792223972000,"value":56.3607},
+            {"timestampMs":1792223973000,"value":50.9983},
+            {"timestampMs":1792223974000,"value":52.5842},
+            {"timestampMs":1792223975000,"value":55.1018},
+            {"timestampMs":1792223976000,"value":54.1555},
+            {"timestampMs":1792223977000,"value":49.728},
+            {"timestampMs":1792223978000,"value":51.6627},
+            {"timestampMs":1792223979000,"value":51.0466},
+            {"timestampMs":1792223980000,"value":49.4387},
+            {"timestampMs":1792223981000,"value":53.0963},
+            {"timestampMs":1792223982000,"value":52.8931},
+            {"timestampMs":1792223983000,"value":50.0912},
+            {"timestampMs":1792223984000,"value":53.3381},
+            {"timestampMs":1792223985000,"value":49.0155},
+            {"timestampMs":1792223986000,"value":49.5904},
+            {"timestampMs":1792223987000,"value":51.4742},
+            {"timestampMs":1792223988000,"value":50.7765},
+            {"timestampMs":1792223989000,"value":50.4641},
+            {"timestampMs":1792223990000,"value":52.6034},
+            {"timestampMs":1792223991000,"value":49.8593},
+            {"timestampMs":1792223992000,"value":55.0132},
+            {"timestampMs":1792223993000,"value":51.9132},
+            {"timestampMs":1792223994000,"value":51.874},
+            {"timestampMs":1792223995000,"value":49.4207},
+            {"timestampMs":1792223996000,"value":52.2995},
+            {"timestampMs":1792223997000,"value":50.2344},
+            {"timestampMs":1792223998000,"value":49.9724},
+            {"timestampMs":1792223999000,"value":54.0962},
+            {"timestampMs":1792224000000,"value":51.5087}
+          ]
+        }
+      ]
+    }
+  ],
+  "outcome": {
+    "events": [
+      {
+        "type": "investigation.started",
+        "query": "checkouts are not working",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-17T07:58:00.000Z",
+          "end": "2026-10-17T08:00:00.000Z",
+          "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+        }
+      },
+      {
+        "type": "investigation.symptom_classified",
+        "symptom": {"roles":["throughput","errors","latency","saturation","lag","kpi"],"method":"unclassified"}
+      },
+      {
+        "type": "investigation.entry_located",
+        "entry": {"vertex":"component:payments","type":"component","method":"flag","candidates":[]}
+      },
+      {
+        "type": "investigation.scope_resolved",
+        "scope": {
+          "suspectFlows": [],
+          "impactFlows": ["flow:place-order"],
+          "vertices": [
+            {"vertex":"component:payments","reason":"entry"},
+            {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+            {"vertex":"component:payment-provider","reason":"path-component"},
+            {"vertex":"dependency:checkout/charge","reason":"contention"},
+            {"vertex":"component:checkout","reason":"contention"}
+          ],
+          "pruned": [
+            {"vertex":"component:web","reason":"unreachable"},
+            {"vertex":"dependency:web/checkout-api","reason":"beyond-hop-budget"},
+            {"vertex":"dependency:checkout/reserve-stock","reason":"beyond-hop-budget"},
+            {"vertex":"dependency:checkout/orders-db","reason":"beyond-hop-budget"},
+            {"vertex":"component:inventory","reason":"unreachable"},
+            {"vertex":"dependency:inventory/stock-cache","reason":"unreachable"},
+            {"vertex":"component:stock-cache","reason":"unreachable"},
+            {"vertex":"component:orders-pg","reason":"unreachable"},
+            {"vertex":"component:orders-reconcile","reason":"unreachable"},
+            {"vertex":"dependency:orders-reconcile/orders-db","reason":"unreachable"}
+          ]
+        }
+      },
+      {
+        "type": "investigation.plan_ready",
+        "plan": {
+          "query": "checkouts are not working",
+          "system": "storefront",
+          "environment": {"name":"prod","context":"prod"},
+          "window": {
+            "start": "2026-10-17T07:58:00.000Z",
+            "end": "2026-10-17T08:00:00.000Z",
+            "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+          },
+          "symptom": {
+            "roles": ["throughput","errors","latency","saturation","lag","kpi"],
+            "method": "unclassified"
+          },
+          "entry": {"vertex":"component:payments","type":"component","method":"flag","candidates":[]},
+          "scope": {
+            "suspectFlows": [],
+            "impactFlows": ["flow:place-order"],
+            "vertices": [
+              {"vertex":"component:payments","reason":"entry"},
+              {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+              {"vertex":"component:payment-provider","reason":"path-component"},
+              {"vertex":"dependency:checkout/charge","reason":"contention"},
+              {"vertex":"component:checkout","reason":"contention"}
+            ],
+            "pruned": [
+              {"vertex":"component:web","reason":"unreachable"},
+              {"vertex":"dependency:web/checkout-api","reason":"beyond-hop-budget"},
+              {"vertex":"dependency:checkout/reserve-stock","reason":"beyond-hop-budget"},
+              {"vertex":"dependency:checkout/orders-db","reason":"beyond-hop-budget"},
+              {"vertex":"component:inventory","reason":"unreachable"},
+              {"vertex":"dependency:inventory/stock-cache","reason":"unreachable"},
+              {"vertex":"component:stock-cache","reason":"unreachable"},
+              {"vertex":"component:orders-pg","reason":"unreachable"},
+              {"vertex":"component:orders-reconcile","reason":"unreachable"},
+              {"vertex":"dependency:orders-reconcile/orders-db","reason":"unreachable"}
+            ]
+          },
+          "checks": [
+            {
+              "id": "c1",
+              "tier": "confirm",
+              "kind": "indicator",
+              "subject": "component:payments",
+              "indicator": {
+                "id": "indicator:component:payments@1",
+                "type": "indicator",
+                "subject": "component:payments",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "The entry itself: confirms the symptom and when it started"
+            },
+            {
+              "id": "c2",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#5",
+              "indicator": {
+                "id": "indicator:step:place-order#5@1",
+                "type": "indicator",
+                "subject": "step:place-order#5",
+                "metric": "payments/http_client_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "payments depends on payment-provider (hard)"
+            },
+            {
+              "id": "c3",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "step:place-order#4",
+              "indicator": {
+                "id": "indicator:step:place-order#4@1",
+                "type": "indicator",
+                "subject": "step:place-order#4",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/charges","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "checkout also uses payments"
+            },
+            {
+              "id": "c4",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@2",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_usage",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "rationale": "checkout also uses payments"
+            },
+            {
+              "id": "c5",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@3",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_pending_requests",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "rationale": "checkout also uses payments"
+            },
+            {
+              "id": "c6",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+              "rationale": "Logs of checkout: checkout also uses payments"
+            },
+            {
+              "id": "c7",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:payments",
+              "roles": [],
+              "rationale": "Logs of payments"
+            },
+            {
+              "id": "c8",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:payments",
+              "roles": [],
+              "rationale": "Spans of payments"
+            },
+            {
+              "id": "c9",
+              "tier": "impact",
+              "kind": "indicator",
+              "subject": "flow:place-order",
+              "indicator": {
+                "id": "indicator:flow:place-order@1",
+                "type": "indicator",
+                "subject": "flow:place-order",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["latency"],
+                "expect": {"kind":"slo","p99":1},
+                "selector": {},
+                "provenance": "declared"
+              },
+              "roles": ["latency"],
+              "rationale": "place-order can be hit downstream"
+            }
+          ],
+          "blindSpots": [{"vertex":"component:payment-provider","reason":"no-telemetry"}],
+          "omittedChecks": 0
+        }
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 1,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 2000,
+        "outputTokens": 300
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r1",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.03,"spread":1.795},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.681,"effectPercent":9.25},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r2",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0008328,"spread":0.0001735},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2590,"effectPercent":53950},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r3",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2091,"spread":0.01442},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":22.57,"effectPercent":155.6},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r4",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r5",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0005,"spread":0.000005},
+          "peak": {"value":0.62,"at":"2026-10-17T07:59:35.000Z","z":123900,"effectPercent":123900},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r6",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r7",
+          "kind": "indicator",
+          "check": "c9",
+          "indicator": "indicator:flow:place-order@1",
+          "subject": "flow:place-order",
+          "role": "latency",
+          "expectation": "slo",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": "met",
+          "bounds": "p99 ≤ 1",
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 2,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 2000,
+        "outputTokens": 300
+      }
+    ],
+    "report": {
+      "schemaVersion": 1,
+      "outcome": "cause-found",
+      "conclusion": {
+        "outcome": "cause-found",
+        "summary": "The fault starts at step:place-order#5.",
+        "cause": {"vertex":"component:payment-provider","mechanism":"errors at the deepest failing hop"},
+        "origin": {"step":"step:place-order#5","uncertain":false},
+        "verdicts": [
+          {"result":"r1","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r2","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r3","verdict":"unhealthy","reason":"latency anomalous"},
+          {"result":"r4","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r5","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r6","verdict":"no-data","reason":"latency no-data"},
+          {"result":"r7","verdict":"healthy","reason":"latency met"}
+        ],
+        "evidence": ["r2","r3","r5"],
+        "confidence": 0.8,
+        "mitigations": [
+          {"tier":"immediate","action":"Fail over the provider","tradeoff":"Higher fees"},
+          {"tier":"short-term","action":"Add a circuit breaker","tradeoff":"Some fast failures"},
+          {"tier":"prevention","action":"Add a second provider","tradeoff":"Integration cost"}
+        ]
+      },
+      "keyFigures": ["r2","r3","r5"],
+      "blindSpots": [{"vertex":"component:payment-provider","reason":"no-telemetry","touches":"cause"}],
+      "impact": {
+        "status": "checked",
+        "subjects": [{"vertex":"flow:place-order","verdict":"healthy","results":["r7"]}]
+      },
+      "plan": {
+        "query": "checkouts are not working",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-17T07:58:00.000Z",
+          "end": "2026-10-17T08:00:00.000Z",
+          "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+        },
+        "symptom": {"roles":["throughput","errors","latency","saturation","lag","kpi"],"method":"unclassified"},
+        "entry": {"vertex":"component:payments","type":"component","method":"flag","candidates":[]},
+        "scope": {
+          "suspectFlows": [],
+          "impactFlows": ["flow:place-order"],
+          "vertices": [
+            {"vertex":"component:payments","reason":"entry"},
+            {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+            {"vertex":"component:payment-provider","reason":"path-component"},
+            {"vertex":"dependency:checkout/charge","reason":"contention"},
+            {"vertex":"component:checkout","reason":"contention"}
+          ],
+          "pruned": [
+            {"vertex":"component:web","reason":"unreachable"},
+            {"vertex":"dependency:web/checkout-api","reason":"beyond-hop-budget"},
+            {"vertex":"dependency:checkout/reserve-stock","reason":"beyond-hop-budget"},
+            {"vertex":"dependency:checkout/orders-db","reason":"beyond-hop-budget"},
+            {"vertex":"component:inventory","reason":"unreachable"},
+            {"vertex":"dependency:inventory/stock-cache","reason":"unreachable"},
+            {"vertex":"component:stock-cache","reason":"unreachable"},
+            {"vertex":"component:orders-pg","reason":"unreachable"},
+            {"vertex":"component:orders-reconcile","reason":"unreachable"},
+            {"vertex":"dependency:orders-reconcile/orders-db","reason":"unreachable"}
+          ]
+        },
+        "checks": [
+          {
+            "id": "c1",
+            "tier": "confirm",
+            "kind": "indicator",
+            "subject": "component:payments",
+            "indicator": {
+              "id": "indicator:component:payments@1",
+              "type": "indicator",
+              "subject": "component:payments",
+              "metric": "payments/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "The entry itself: confirms the symptom and when it started"
+          },
+          {
+            "id": "c2",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#5",
+            "indicator": {
+              "id": "indicator:step:place-order#5@1",
+              "type": "indicator",
+              "subject": "step:place-order#5",
+              "metric": "payments/http_client_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "payments depends on payment-provider (hard)"
+          },
+          {
+            "id": "c3",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "step:place-order#4",
+            "indicator": {
+              "id": "indicator:step:place-order#4@1",
+              "type": "indicator",
+              "subject": "step:place-order#4",
+              "metric": "payments/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"route":"/charges","method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "checkout also uses payments"
+          },
+          {
+            "id": "c4",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:checkout",
+            "indicator": {
+              "id": "indicator:component:checkout@2",
+              "type": "indicator",
+              "subject": "component:checkout",
+              "metric": "checkout/db_client_connections_usage",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "rationale": "checkout also uses payments"
+          },
+          {
+            "id": "c5",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:checkout",
+            "indicator": {
+              "id": "indicator:component:checkout@3",
+              "type": "indicator",
+              "subject": "component:checkout",
+              "metric": "checkout/db_client_connections_pending_requests",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "rationale": "checkout also uses payments"
+          },
+          {
+            "id": "c6",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:checkout",
+            "roles": [],
+            "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+            "rationale": "Logs of checkout: checkout also uses payments"
+          },
+          {
+            "id": "c7",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:payments",
+            "roles": [],
+            "rationale": "Logs of payments"
+          },
+          {
+            "id": "c8",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:payments",
+            "roles": [],
+            "rationale": "Spans of payments"
+          },
+          {
+            "id": "c9",
+            "tier": "impact",
+            "kind": "indicator",
+            "subject": "flow:place-order",
+            "indicator": {
+              "id": "indicator:flow:place-order@1",
+              "type": "indicator",
+              "subject": "flow:place-order",
+              "metric": "checkout/http_server_request_duration_seconds",
+              "roles": ["latency"],
+              "expect": {"kind":"slo","p99":1},
+              "selector": {},
+              "provenance": "declared"
+            },
+            "roles": ["latency"],
+            "rationale": "place-order can be hit downstream"
+          }
+        ],
+        "blindSpots": [{"vertex":"component:payment-provider","reason":"no-telemetry"}],
+        "omittedChecks": 0
+      },
+      "results": [
+        {
+          "result": "r1",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.03,"spread":1.795},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.681,"effectPercent":9.25},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r2",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0008328,"spread":0.0001735},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2590,"effectPercent":53950},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r3",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2091,"spread":0.01442},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":22.57,"effectPercent":155.6},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r4",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r5",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0005,"spread":0.000005},
+          "peak": {"value":0.62,"at":"2026-10-17T07:59:35.000Z","z":123900,"effectPercent":123900},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r6",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r7",
+          "kind": "indicator",
+          "check": "c9",
+          "indicator": "indicator:flow:place-order@1",
+          "subject": "flow:place-order",
+          "role": "latency",
+          "expectation": "slo",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": "met",
+          "bounds": "p99 ≤ 1",
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      ],
+      "profiles": {
+        "r1": {
+          "points": [55.69,55.63,54.64,55.29,55.24,53.28,54.23,54.36,56.85,56.36,53.34,55.01],
+          "bucketSeconds": 10,
+          "last": 51.51,
+          "shape": "flat",
+          "state": null
+        },
+        "r2": {
+          "points": [
+            0.001016,
+            0.001375,
+            0.001279,
+            0.001197,
+            0.001065,
+            0.001106,
+            0.001093,
+            0.001055,
+            0.0009055,
+            0.4501,
+            0.2132,
+            0.04813
+          ],
+          "bucketSeconds": 10,
+          "last": 0.01136,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r3": {
+          "points": [0.2236,0.2465,0.2383,0.2265,0.2293,0.2313,0.2243,0.2333,0.2329,0.5345,0.3759,0.259],
+          "bucketSeconds": 10,
+          "last": 0.2411,
+          "shape": "spike",
+          "state": "recovered"
+        },
+        "r5": {
+          "points": [0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.62,0.2697,0.05135],
+          "bucketSeconds": 10,
+          "last": 0.0101,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r7": {
+          "points": [0.1945,0.1978,0.1935,0.1985,0.2023,0.2035,0.1983,0.1876,0.1976,0.6515,0.4243,0.2362],
+          "bucketSeconds": 10,
+          "last": 0.1839,
+          "shape": "spike",
+          "state": "recovering"
+        }
+      },
+      "redaction": {"totals":{"records":0,"fieldsDropped":0,"truncated":0,"matches":{}},"droppedFields":[]},
+      "reachedPruned": [],
+      "usage": {
+        "turns": 2,
+        "toolCalls": 2,
+        "inputTokens": 4000,
+        "outputTokens": 600,
+        "cachedInputTokens": 0,
+        "toolCost": 14,
+        "elapsedMs": 0
+      }
+    }
+  }
+}

@@ -17,3 +17,22 @@ export enum DeviationDirection {
   Up = 'up',
   Down = 'down',
 }
+
+/** How an excursion rose, read from the profile of the window. */
+export enum ProfileShape {
+  /** Nothing in the window deviates from the baseline. */
+  Flat = 'flat',
+  /** Got near its peak within one bucket of starting. */
+  Step = 'step',
+  /** Took several buckets to get near its peak. */
+  Ramp = 'ramp',
+  /** Short, and already falling back. */
+  Spike = 'spike',
+}
+
+/** Where an excursion stands at the end of the window. */
+export enum ProfileState {
+  Ongoing = 'ongoing',
+  Recovering = 'recovering',
+  Recovered = 'recovered',
+}

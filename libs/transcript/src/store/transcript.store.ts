@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ITranscriptConfig } from '../config/transcript-config.model';
@@ -45,14 +45,25 @@ export class TranscriptStore {
     return decodeTranscript(text, file);
   }
 
+  /** The newest transcript in the runs directory, if there is one. */
+  latest(): string | undefined {
+    const [newest] = this.newestFirst();
+    return newest === undefined ? undefined : path.join(this.config.runsDir, newest);
+  }
+
   private prune(): void {
-    const transcripts = readdirSync(this.config.runsDir)
+    for (const name of this.newestFirst().slice(this.config.keep)) {
+      rmSync(path.join(this.config.runsDir, name), { force: true });
+    }
+  }
+
+  private newestFirst(): string[] {
+    if (!existsSync(this.config.runsDir)) {
+      return [];
+    }
+    return readdirSync(this.config.runsDir)
       .filter((name) => TRANSCRIPT_FILE.test(name))
       .sort()
       .reverse();
-
-    for (const name of transcripts.slice(this.config.keep)) {
-      rmSync(path.join(this.config.runsDir, name), { force: true });
-    }
   }
 }

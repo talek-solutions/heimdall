@@ -120,17 +120,23 @@ DIVERGED (exit 6)
 
 ## CI transcripts
 
-`libs/investigation/src/__fixtures__/transcripts/` holds the three fixture walks, recorded by the
-scripted model of the e2e spec:
+`libs/investigation/src/__fixtures__/transcripts/` holds the three fixture walks, and one impact
+case, recorded by the scripted model of the e2e spec:
 - `error-burst-30s` (`--since 2m`)
 - `increased-latency-1` (`--since 60m`, with `INVESTIGATION_LOG_SAMPLE_LIMIT=40` to keep the
   file small)
 - `healthy-baseline` (`--since 60m`)
+- `payments-impact`: the `error-burst-30s` scenario entered at `component:payments` (`--since 2m`),
+  whose plan checks the flow it serves for impact
 
 The replay spec replays each in strict mode, byte for byte, with HTTP datasources and a `fetch`
 that throws. `npm run transcripts:record` re-records them for free after a deliberate change. A
 recording is byte-stable: `recordedAt` is set to the anchor and `usage.elapsedMs` to 0, the two
 values that vary between runs.
+
+Each transcript's report is also rendered as text and pinned by a golden file
+([investigation-report.md](../schema/investigation-report.md#testing)). `npm run golden:update`
+re-records the transcripts and rewrites the golden files in one step.
 
 ## Known limits
 

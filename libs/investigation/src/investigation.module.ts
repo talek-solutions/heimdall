@@ -13,6 +13,7 @@ import { InvestigationExecutionService } from './execution/investigation-executi
 import { LogQlCompiler } from './execution/queries/logql.compiler';
 import { PromQlCompiler } from './execution/queries/promql.compiler';
 import { TraceQlCompiler } from './execution/queries/traceql.compiler';
+import { ReportBuilder } from './execution/report/report.builder';
 import { TelemetrySourcesResolver } from './execution/sources/telemetry-sources.resolver';
 import { InvestigationIntake } from './intake/investigation.intake';
 import { InvestigationInitService } from './investigation-init.service';
@@ -45,6 +46,7 @@ import { SymptomTriage } from './triage/symptom.triage';
     EvidenceRunner,
     ConclusionValidator,
     TelemetrySourcesResolver,
+    ReportBuilder,
     InvestigationExecutionService,
   ],
   exports: [InvestigationInitService, InvestigationExecutionService, INVESTIGATION_CONFIG],

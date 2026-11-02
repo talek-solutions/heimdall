@@ -5093,6 +5093,42 @@
       }
     ],
     "report": {
+      "schemaVersion": 1,
+      "outcome": "cause-found",
+      "conclusion": {
+        "outcome": "cause-found",
+        "summary": "The fault starts at step:place-order#5.",
+        "cause": {"vertex":"component:payment-provider","mechanism":"errors at the deepest failing hop"},
+        "origin": {"step":"step:place-order#5","uncertain":false},
+        "verdicts": [
+          {"result":"r1","verdict":"unhealthy","reason":"kpi anomalous"},
+          {"result":"r2","verdict":"healthy","reason":"latency met"},
+          {"result":"r3","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r4","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r5","verdict":"unhealthy","reason":"latency anomalous"},
+          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r7","verdict":"healthy","reason":"errors normal"},
+          {"result":"r8","verdict":"healthy","reason":"latency normal"},
+          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r10","verdict":"no-data","reason":"latency no-data"},
+          {"result":"r11","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r12","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r13","verdict":"unhealthy","reason":"latency anomalous"},
+          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r15","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r16","verdict":"no-data","reason":"latency no-data"}
+        ],
+        "evidence": ["r1","r4","r5","r12","r13","r15"],
+        "confidence": 0.8,
+        "mitigations": [
+          {"tier":"immediate","action":"Fail over the provider","tradeoff":"Higher fees"},
+          {"tier":"short-term","action":"Add a circuit breaker","tradeoff":"Some fast failures"},
+          {"tier":"prevention","action":"Add a second provider","tradeoff":"Integration cost"}
+        ]
+      },
+      "keyFigures": ["r1","r15"],
+      "blindSpots": [{"vertex":"component:payment-provider","reason":"no-telemetry","touches":"cause"}],
+      "impact": {"status":"not-planned","subjects":[]},
       "plan": {
         "query": "checkouts are not working",
         "system": "storefront",
@@ -5971,6 +6007,131 @@
           "problem": null
         }
       ],
+      "profiles": {
+        "r1": {
+          "points": [111.1,113.7,109.8,112.4,112.5,116,116.7,115.8,116.2,94.66,101.6,110.9],
+          "bucketSeconds": 10,
+          "last": 118.7,
+          "shape": "spike",
+          "state": "recovered"
+        },
+        "r2": {
+          "points": [0.1945,0.1978,0.1935,0.1985,0.2023,0.2035,0.1983,0.1876,0.1976,0.6515,0.4243,0.2362],
+          "bucketSeconds": 10,
+          "last": 0.1839,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r3": {
+          "points": [121.1,119.7,121.6,122.5,122.7,124.4,123.1,125.4,123.3,120.1,126.9,125.2],
+          "bucketSeconds": 10,
+          "last": 119.3,
+          "shape": "flat",
+          "state": null
+        },
+        "r4": {
+          "points": [
+            0.001588,
+            0.001831,
+            0.001468,
+            0.001544,
+            0.001757,
+            0.00161,
+            0.001555,
+            0.001637,
+            0.001709,
+            0.1901,
+            0.1053,
+            0.02416
+          ],
+          "bucketSeconds": 10,
+          "last": 0.005935,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r5": {
+          "points": [0.1945,0.1978,0.1935,0.1985,0.2023,0.2035,0.1983,0.1876,0.1976,0.6515,0.4243,0.2362],
+          "bucketSeconds": 10,
+          "last": 0.1839,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r6": {
+          "points": [127.9,129,135.3,133.2,134.7,133.1,132.4,130.7,135.3,127.5,129.8,134.5],
+          "bucketSeconds": 10,
+          "last": 134.5,
+          "shape": "flat",
+          "state": null
+        },
+        "r7": {
+          "points": [
+            0.0006215,
+            0.0005151,
+            0.0004763,
+            0.0006213,
+            0.0006303,
+            0.0004663,
+            0.0005196,
+            0.000551,
+            0.0005292,
+            0.0006717,
+            0.0005718,
+            0.0004979
+          ],
+          "bucketSeconds": 10,
+          "last": 0.0002798,
+          "shape": "flat",
+          "state": null
+        },
+        "r8": {
+          "points": [0.1039,0.1021,0.1004,0.1066,0.1001,0.1023,0.1029,0.1017,0.09839,0.1002,0.09989,0.09822],
+          "bucketSeconds": 10,
+          "last": 0.08835,
+          "shape": "flat",
+          "state": null
+        },
+        "r11": {
+          "points": [55.69,55.63,54.64,55.29,55.24,53.28,54.23,54.36,56.85,56.36,53.34,55.01],
+          "bucketSeconds": 10,
+          "last": 51.51,
+          "shape": "flat",
+          "state": null
+        },
+        "r12": {
+          "points": [
+            0.001016,
+            0.001375,
+            0.001279,
+            0.001197,
+            0.001065,
+            0.001106,
+            0.001093,
+            0.001055,
+            0.0009055,
+            0.4501,
+            0.2132,
+            0.04813
+          ],
+          "bucketSeconds": 10,
+          "last": 0.01136,
+          "shape": "spike",
+          "state": "recovering"
+        },
+        "r13": {
+          "points": [0.2236,0.2465,0.2383,0.2265,0.2293,0.2313,0.2243,0.2333,0.2329,0.5345,0.3759,0.259],
+          "bucketSeconds": 10,
+          "last": 0.2411,
+          "shape": "spike",
+          "state": "recovered"
+        },
+        "r15": {
+          "points": [0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.62,0.2697,0.05135],
+          "bucketSeconds": 10,
+          "last": 0.0101,
+          "shape": "spike",
+          "state": "recovering"
+        }
+      },
       "redaction": {"totals":{"records":0,"fieldsDropped":0,"truncated":0,"matches":{}},"droppedFields":[]},
       "reachedPruned": [],
       "usage": {
@@ -5981,38 +6142,6 @@
         "cachedInputTokens": 0,
         "toolCost": 32,
         "elapsedMs": 0
-      },
-      "outcome": "cause-found",
-      "conclusion": {
-        "outcome": "cause-found",
-        "summary": "The fault starts at step:place-order#5.",
-        "cause": {"vertex":"component:payment-provider","mechanism":"errors at the deepest failing hop"},
-        "origin": {"step":"step:place-order#5","uncertain":false},
-        "verdicts": [
-          {"result":"r1","verdict":"unhealthy","reason":"kpi anomalous"},
-          {"result":"r2","verdict":"healthy","reason":"latency met"},
-          {"result":"r3","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r4","verdict":"unhealthy","reason":"errors anomalous"},
-          {"result":"r5","verdict":"unhealthy","reason":"latency anomalous"},
-          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r7","verdict":"healthy","reason":"errors normal"},
-          {"result":"r8","verdict":"healthy","reason":"latency normal"},
-          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r10","verdict":"no-data","reason":"latency no-data"},
-          {"result":"r11","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r12","verdict":"unhealthy","reason":"errors anomalous"},
-          {"result":"r13","verdict":"unhealthy","reason":"latency anomalous"},
-          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r15","verdict":"unhealthy","reason":"errors anomalous"},
-          {"result":"r16","verdict":"no-data","reason":"latency no-data"}
-        ],
-        "evidence": ["r1","r4","r5","r12","r13","r15"],
-        "confidence": 0.8,
-        "mitigations": [
-          {"tier":"immediate","action":"Fail over the provider","tradeoff":"Higher fees"},
-          {"tier":"short-term","action":"Add a circuit breaker","tradeoff":"Some fast failures"},
-          {"tier":"prevention","action":"Add a second provider","tradeoff":"Integration cost"}
-        ]
       }
     }
   }

@@ -1,0 +1,29 @@
+
+conclusion     cause-found (confidence 0.80)
+summary        The fault starts at step:place-order#5.
+cause          component:payment-provider — errors at the deepest failing hop
+origin         step:place-order#5
+
+mitigations
+  immediate   Fail over the provider
+              trade-off: Higher fees
+  short-term  Add a circuit breaker
+              trade-off: Some fast failures
+  prevention  Add a second provider
+              trade-off: Integration cost
+
+key figures    times in UTC
+  component:payments errors   0.0833% → 45% (541×)
+                              ▁▁▁▁▁▁▁▁▁█▄▂  spike at 07:59:35, easing, now 1.14%
+  component:payments latency  209ms → 535ms (2.56×)
+                              ▁▂▁▁▁▁▁▁▁█▄▂  spike at 07:59:35, back to 241ms
+  step:place-order#5 errors   0.05% → 62% (1240×)
+                              ▁▁▁▁▁▁▁▁▁█▄▂  spike at 07:59:35, easing, now 1.01%
+
+blind spots    component:payment-provider (the cause) emits no telemetry: only what its neighbours saw supports it
+impact         flow:place-order healthy (r7)
+
+evidence       component:payments  r2 errors anomalous · r3 latency anomalous
+               step:place-order#5  r5 errors anomalous
+
+usage          2 turns · 2 tool calls · 14 queries · 4000 in / 600 out tokens · 0.0s

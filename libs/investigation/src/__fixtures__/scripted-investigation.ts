@@ -89,12 +89,21 @@ export function readVerdict(result: IRoleResult): ResultVerdict {
       : ResultVerdict.Healthy;
 }
 
-/** Runs confirm and localise in one call, then concludes by the origin rule. */
+const FIRST_PASS: ReadonlySet<CheckTier> = new Set([
+  CheckTier.Confirm,
+  CheckTier.Localise,
+  CheckTier.Impact,
+]);
+
+/** Runs confirm, localise and impact in one call, then concludes by the origin rule. */
 export function investigator(plan: IInvestigationPlan): Brain {
   const firstPass = plan.checks
     .filter((check) => check.kind === CheckKind.Indicator)
-    .filter((check) => check.tier === CheckTier.Confirm || check.tier === CheckTier.Localise)
+    .filter((check) => FIRST_PASS.has(check.tier))
     .map((check) => check.id);
+  const impact = new Set(
+    plan.checks.filter((check) => check.tier === CheckTier.Impact).map((check) => check.id),
+  );
 
   return (request, turn) => {
     if (turn === 1) {
@@ -106,7 +115,10 @@ export function investigator(plan: IInvestigationPlan): Brain {
       verdict: readVerdict(result),
       reason: `${result.role} ${result.verdict ?? result.signal}`,
     }));
-    const unhealthy = verdicts.filter(({ verdict }) => verdict === ResultVerdict.Unhealthy);
+    // Impact is reported, never cited as a cause.
+    const unhealthy = results
+      .filter((result) => readVerdict(result) === ResultVerdict.Unhealthy)
+      .filter((result) => result.check === null || !impact.has(result.check));
     const failingSteps = results
       .filter((result) => result.subject.startsWith('step:'))
       .filter((result) => readVerdict(result) === ResultVerdict.Unhealthy)

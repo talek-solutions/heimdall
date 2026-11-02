@@ -20325,6 +20325,54 @@
       }
     ],
     "report": {
+      "schemaVersion": 1,
+      "outcome": "cause-found",
+      "conclusion": {
+        "outcome": "cause-found",
+        "summary": "A long transaction blocks step:place-order#3.",
+        "cause": {
+          "vertex": "component:orders-reconcile",
+          "mechanism": "a batch transaction holds row locks on orders"
+        },
+        "origin": {"step":"step:place-order#3","uncertain":false},
+        "verdicts": [
+          {"result":"r1","verdict":"unhealthy","reason":"kpi anomalous"},
+          {"result":"r2","verdict":"unhealthy","reason":"latency breached"},
+          {"result":"r3","verdict":"healthy","reason":"throughput anomalous"},
+          {"result":"r4","verdict":"unhealthy","reason":"errors anomalous"},
+          {"result":"r5","verdict":"unhealthy","reason":"latency anomalous"},
+          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
+          {"result":"r7","verdict":"healthy","reason":"errors normal"},
+          {"result":"r8","verdict":"healthy","reason":"latency normal"},
+          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r10","verdict":"unhealthy","reason":"latency anomalous"},
+          {"result":"r11","verdict":"healthy","reason":"throughput anomalous"},
+          {"result":"r12","verdict":"healthy","reason":"errors normal"},
+          {"result":"r13","verdict":"healthy","reason":"latency normal"},
+          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
+          {"result":"r15","verdict":"no-data","reason":"errors no-data"},
+          {"result":"r16","verdict":"no-data","reason":"latency no-data"},
+          {"result":"r17","verdict":"unhealthy","reason":"saturation anomalous"},
+          {"result":"r18","verdict":"unhealthy","reason":"saturation anomalous"},
+          {"result":"r19","verdict":"unhealthy","reason":"saturation breached"},
+          {"result":"r20","verdict":"unhealthy","reason":"saturation anomalous"},
+          {"result":"r21","verdict":"unhealthy","reason":"saturation anomalous"}
+        ],
+        "evidence": ["r1","r2","r4","r5","r10","r17","r18","r19","r20","r21","r22","r23","r24"],
+        "confidence": 0.8,
+        "mitigations": [
+          {"tier":"immediate","action":"Stop the batch job","tradeoff":"Reconciliation waits"},
+          {"tier":"short-term","action":"Commit in smaller batches","tradeoff":"More commits"},
+          {
+            "tier": "prevention",
+            "action": "Run reconciliation off a replica",
+            "tradeoff": "Replica cost"
+          }
+        ]
+      },
+      "keyFigures": ["r1","r2","r10","r22","r19"],
+      "blindSpots": [{"vertex":"component:orders-reconcile","reason":"no-indicators","touches":"cause"}],
+      "impact": {"status":"not-planned","subjects":[]},
       "plan": {
         "query": "checkouts are not working",
         "system": "storefront",
@@ -21884,6 +21932,179 @@
           "problem": null
         }
       ],
+      "profiles": {
+        "r1": {
+          "points": [102.9,103.7,102.3,100.8,99.52,101,97.11,84.54,81.95,81.21,81.6,80.04],
+          "bucketSeconds": 300,
+          "last": 84.44,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r2": {
+          "points": [0.1857,0.1945,0.179,0.1921,0.1889,0.1902,1.127,2.179,2.235,2.231,2.228,2.24],
+          "bucketSeconds": 300,
+          "last": 2.209,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r3": {
+          "points": [103.1,103.9,102.5,100.9,99.67,101.1,98.5,90.05,88.62,87.82,88.29,86.68],
+          "bucketSeconds": 300,
+          "last": 91.03,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r4": {
+          "points": [
+            0.001908,
+            0.00186,
+            0.001916,
+            0.001626,
+            0.001825,
+            0.001621,
+            0.02217,
+            0.06139,
+            0.06326,
+            0.06343,
+            0.06359,
+            0.06357
+          ],
+          "bucketSeconds": 300,
+          "last": 0.06281,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r5": {
+          "points": [0.1857,0.1945,0.179,0.1921,0.1889,0.1902,1.127,2.179,2.235,2.231,2.228,2.24],
+          "bucketSeconds": 300,
+          "last": 2.209,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r6": {
+          "points": [120.3,120,117.1,119.3,119.7,121.8,119.4,120.4,123.9,121.3,119.2,121.1],
+          "bucketSeconds": 300,
+          "last": 123.5,
+          "shape": "flat",
+          "state": null
+        },
+        "r7": {
+          "points": [
+            0.0005212,
+            0.0005708,
+            0.0005376,
+            0.0007548,
+            0.000502,
+            0.0005724,
+            0.0005955,
+            0.0006253,
+            0.0006363,
+            0.0004906,
+            0.00056,
+            0.0006788
+          ],
+          "bucketSeconds": 300,
+          "last": 0.0004512,
+          "shape": "flat",
+          "state": null
+        },
+        "r8": {
+          "points": [
+            0.09247,
+            0.09007,
+            0.09731,
+            0.09318,
+            0.09735,
+            0.09107,
+            0.09635,
+            0.09401,
+            0.09544,
+            0.08783,
+            0.09683,
+            0.1023
+          ],
+          "bucketSeconds": 300,
+          "last": 0.1023,
+          "shape": "flat",
+          "state": null
+        },
+        "r10": {
+          "points": [0.01504,0.01506,0.01552,0.01426,0.01486,0.8326,1.802,1.803,1.803,1.802,1.803,1.803],
+          "bucketSeconds": 300,
+          "last": 1.801,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r11": {
+          "points": [43.6,44.65,43.53,44.47,43.73,45.52,42.25,39.59,37.99,36.78,37.39,37.11],
+          "bucketSeconds": 300,
+          "last": 41.88,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r12": {
+          "points": [
+            0.001194,
+            0.001197,
+            0.001124,
+            0.001334,
+            0.001093,
+            0.001174,
+            0.001211,
+            0.001238,
+            0.001189,
+            0.001428,
+            0.00113,
+            0.001245
+          ],
+          "bucketSeconds": 300,
+          "last": 0.0007696,
+          "shape": "flat",
+          "state": null
+        },
+        "r13": {
+          "points": [0.2098,0.2375,0.2307,0.2217,0.204,0.2218,0.2258,0.2315,0.2331,0.2121,0.2187,0.2331],
+          "bucketSeconds": 300,
+          "last": 0.1727,
+          "shape": "flat",
+          "state": null
+        },
+        "r17": {
+          "points": [42,41,42,43,41,40,50,50,50,50,50,50],
+          "bucketSeconds": 300,
+          "last": 50,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r18": {
+          "points": [1,1,0,1,1,1,16,37,38,39,39,38],
+          "bucketSeconds": 300,
+          "last": 38,
+          "shape": "ramp",
+          "state": "ongoing"
+        },
+        "r19": {
+          "points": [0.619,0.6488,0.5965,0.8632,0.69,225.5,525.5,825.5,1125,1425,1725,2040],
+          "bucketSeconds": 300,
+          "last": 2040,
+          "shape": "ramp",
+          "state": "ongoing"
+        },
+        "r20": {
+          "points": [10,13,11,12,11,27,53,54,53,54,54,52],
+          "bucketSeconds": 300,
+          "last": 50,
+          "shape": "step",
+          "state": "ongoing"
+        },
+        "r21": {
+          "points": [29,28,28,26,33,105,142,143,142,141,142,142],
+          "bucketSeconds": 300,
+          "last": 140,
+          "shape": "ramp",
+          "state": "ongoing"
+        }
+      },
       "redaction": {
         "totals": {"records":829,"fieldsDropped":1030,"truncated":0,"matches":{}},
         "droppedFields": [
@@ -21922,50 +22143,6 @@
         "cachedInputTokens": 0,
         "toolCost": 79,
         "elapsedMs": 0
-      },
-      "outcome": "cause-found",
-      "conclusion": {
-        "outcome": "cause-found",
-        "summary": "A long transaction blocks step:place-order#3.",
-        "cause": {
-          "vertex": "component:orders-reconcile",
-          "mechanism": "a batch transaction holds row locks on orders"
-        },
-        "origin": {"step":"step:place-order#3","uncertain":false},
-        "verdicts": [
-          {"result":"r1","verdict":"unhealthy","reason":"kpi anomalous"},
-          {"result":"r2","verdict":"unhealthy","reason":"latency breached"},
-          {"result":"r3","verdict":"healthy","reason":"throughput anomalous"},
-          {"result":"r4","verdict":"unhealthy","reason":"errors anomalous"},
-          {"result":"r5","verdict":"unhealthy","reason":"latency anomalous"},
-          {"result":"r6","verdict":"healthy","reason":"throughput normal"},
-          {"result":"r7","verdict":"healthy","reason":"errors normal"},
-          {"result":"r8","verdict":"healthy","reason":"latency normal"},
-          {"result":"r9","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r10","verdict":"unhealthy","reason":"latency anomalous"},
-          {"result":"r11","verdict":"healthy","reason":"throughput anomalous"},
-          {"result":"r12","verdict":"healthy","reason":"errors normal"},
-          {"result":"r13","verdict":"healthy","reason":"latency normal"},
-          {"result":"r14","verdict":"no-data","reason":"throughput no-data"},
-          {"result":"r15","verdict":"no-data","reason":"errors no-data"},
-          {"result":"r16","verdict":"no-data","reason":"latency no-data"},
-          {"result":"r17","verdict":"unhealthy","reason":"saturation anomalous"},
-          {"result":"r18","verdict":"unhealthy","reason":"saturation anomalous"},
-          {"result":"r19","verdict":"unhealthy","reason":"saturation breached"},
-          {"result":"r20","verdict":"unhealthy","reason":"saturation anomalous"},
-          {"result":"r21","verdict":"unhealthy","reason":"saturation anomalous"}
-        ],
-        "evidence": ["r1","r2","r4","r5","r10","r17","r18","r19","r20","r21","r22","r23","r24"],
-        "confidence": 0.8,
-        "mitigations": [
-          {"tier":"immediate","action":"Stop the batch job","tradeoff":"Reconciliation waits"},
-          {"tier":"short-term","action":"Commit in smaller batches","tradeoff":"More commits"},
-          {
-            "tier": "prevention",
-            "action": "Run reconciliation off a replica",
-            "tradeoff": "Replica cost"
-          }
-        ]
       }
     }
   }

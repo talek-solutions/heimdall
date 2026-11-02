@@ -1,0 +1,12 @@
+
+conclusion     no-signal (confidence 0.70)
+summary        Nothing in scope deviates from its baseline.
+
+blind spots    no-signal does not cover these:
+               component:web emits no telemetry
+               component:payment-provider emits no telemetry
+               component:stock-cache emits no telemetry
+               component:orders-reconcile has no indicators
+impact         not checked: no impact flows in scope
+
+usage          2 turns · 2 tool calls · 32 queries · 4000 in / 600 out tokens · 0.0s

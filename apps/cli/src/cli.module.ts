@@ -12,6 +12,7 @@ import { ConfigCommand } from './commands/config/config.command';
 import { EvalCommand } from './commands/eval/eval.command';
 import { InvestigateCommand } from './commands/investigate/investigate.command';
 import { ReplayCommand } from './commands/replay/replay.command';
+import { ReportCommand } from './commands/report/report.command';
 import { VersionCommand } from './commands/version/version.command';
 import { CliConfigService } from './config/cli-config.service';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
@@ -48,6 +49,7 @@ import { Streams } from './presentation/streams';
     EvalCommand,
     InvestigateCommand,
     ReplayCommand,
+    ReportCommand,
     VersionCommand,
   ],
 })

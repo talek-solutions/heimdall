@@ -10,6 +10,7 @@ import type { ExecutionSession } from '../execution.session';
 import { DeviationCalculator, type IDeviation } from '../health/deviation.calculator';
 import { ExpectationEvaluator } from '../health/expectation.evaluator';
 import { ObjectiveVerdict, PreliminarySignal } from '../health/health.enums';
+import { ProfileSummariser, type IProfile } from '../health/profile.summariser';
 import { PromQlCompiler } from '../queries/promql.compiler';
 import { queryWindow, zoomWindow, type IQueryWindow } from '../queries/step-policy';
 import type { ICheckProblem, IRoleResult } from './check-result.interface';
@@ -30,11 +31,19 @@ export interface ICheckRun {
   readonly queries: number;
 }
 
+interface IRoleRun {
+  readonly result: IRoleResult;
+  readonly queries: number;
+  /** For the report only; never part of the result the agent reads. */
+  readonly profile?: IProfile | undefined;
+}
+
 /** Compile → query window and baseline → deviation and objective verdict, per role (ADR 0018). */
 @Injectable()
 export class CheckRunner {
   private readonly deviations: DeviationCalculator;
   private readonly expectations: ExpectationEvaluator;
+  private readonly profiles: ProfileSummariser;
 
   constructor(
     private readonly metrics: MetricsSource,
@@ -43,6 +52,7 @@ export class CheckRunner {
   ) {
     this.deviations = new DeviationCalculator(config.execution.deviation);
     this.expectations = new ExpectationEvaluator(config.execution.deviation);
+    this.profiles = new ProfileSummariser(config.execution.deviation);
   }
 
   async run(
@@ -57,8 +67,11 @@ export class CheckRunner {
       planned.map(({ role, id }) => this.runRole(session, target, role, id, query, signal)),
     );
 
-    for (const { result } of outcomes) {
+    for (const { result, profile } of outcomes) {
       session.record(result);
+      if (profile !== undefined) {
+        session.noteProfile(result.result, profile);
+      }
     }
     return {
       results: outcomes.map(({ result }) => result),
@@ -73,7 +86,7 @@ export class CheckRunner {
     id: string,
     window: IQueryWindow,
     signal: AbortSignal,
-  ): Promise<{ readonly result: IRoleResult; readonly queries: number }> {
+  ): Promise<IRoleRun> {
     const compiled = this.compiler.compile(
       session.graph,
       target.indicator,
@@ -135,6 +148,7 @@ export class CheckRunner {
           breachOnsetMs: objective?.onsetMs,
         }),
         queries: QUERIES_PER_ROLE,
+        profile: this.profiles.summarise(worst.points, window, worst.deviation),
       };
     } catch (error) {
       if (!(error instanceof TelemetryError)) {

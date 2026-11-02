@@ -3,7 +3,9 @@
 - **Priority:** Medium
 - **Persona:** Software engineer
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) item 3
-- **Decided in:** [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md)
+- **Decided in:** [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md),
+  amendment of 2026-11-01
+- **Specified in:** [investigation-report.md](../../schema/investigation-report.md)
 
 ## Story
 
@@ -16,10 +18,12 @@ later.
 | # | It can… | Status |
 |---|---|---|
 | 1 | Propose mitigations in three tiers (immediate or manual, short-term, prevention), each with trade-offs | in progress: each mitigation carries a tier and a non-empty trade-off; a single tier still passes the validator |
-| 2 | Report the impact tier: what else is hurt, never presented as a cause | planned |
-| 3 | Render the report as text, as `--json`, and as the final `--ndjson` event | in progress: `--json` and the `concluded` event are covered by specs; the text renderer has no spec |
-| 4 | Link the report to the run's trace id and list the blind spots the conclusion rests on | in progress: the report carries the trace id; blind spots are in its plan but not rendered |
-| 5 | Specify the report in `.docs/schema/investigation-report.md` | planned |
+| 2 | Report the impact tier: what else is hurt, never presented as a cause | done |
+| 3 | Render the report as text, as `--json`, and as the final `--ndjson` event | done: the text is pinned by golden files |
+| 4 | Link the report to the run's trace id and list the blind spots the conclusion rests on | done |
+| 5 | Specify the report in `.docs/schema/investigation-report.md` | done |
+| 6 | Show key figures: baseline to peak, the breach, and a 12-point profile of the window with its shape and state | done |
+| 7 | Show a recorded run's report again with `heimdall report`, from its transcript | done |
 
 ## Acceptance
 
@@ -29,6 +33,13 @@ later.
   `healthy-baseline` are scored against the checkout README walks; the rubric is shared with
   [0018-04](04-replay-and-golden-evals.md).
 - The text renderer writes to stdout only through `Streams`: the stream guard passes.
+- The text of every CI transcript's report matches its golden file:
+  `investigation-report.renderer.spec.ts`. `heimdall report` prints the same text: report e2e.
+- Key figures, blind spots and impact follow their rules on the CI transcripts:
+  `report.builder.spec.ts`. Shapes and states follow theirs on synthetic series:
+  `profile.summariser.spec.ts`.
+- Profiles never reach the model: re-recording added them to each report and left every prompt
+  and tool result of the CI transcripts unchanged.
 
 ## Notes
 

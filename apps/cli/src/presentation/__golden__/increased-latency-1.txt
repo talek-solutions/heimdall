@@ -1,0 +1,43 @@
+
+conclusion     cause-found (confidence 0.80)
+summary        A long transaction blocks step:place-order#3.
+cause          component:orders-reconcile — a batch transaction holds row locks on orders
+origin         step:place-order#3
+
+mitigations
+  immediate   Stop the batch job
+              trade-off: Reconciliation waits
+  short-term  Commit in smaller batches
+              trade-off: More commits
+  prevention  Run reconciliation off a replica
+              trade-off: Replica cost
+
+key figures    times in UTC
+  functionality:checkout kpi       110/s → 80/s (-27%)
+                                   ███▇▇▇▆▂▂▁▁▁  step down at 07:36, still 84.4/s
+  flow:place-order latency         166ms → 2.24s (13.5×)   breached p99 ≤ 1s at 07:34
+                                   ▁▁▁▁▁▁▄█████  step up at 07:30, still 2.21s
+  step:place-order#3 latency       12ms → 1.8s (151×)
+                                   ▁▁▁▁▁▄██████  step up at 07:27, still 1.8s
+  component:orders-reconcile logs  "reconciling batch" 0 → 74 lines (sampled), first at 07:28
+                                   "upstream ledger page fetched" 0 → 46 lines (sampled), first at 07:28
+  component:orders-pg saturation   395ms → 2040s (5170×)   breached ≤ 30s at 07:26
+                                   ▁▁▁▁▁▂▃▄▅▆▇█  climbing since 07:26, still 2040s
+
+blind spots    component:orders-reconcile (the cause) has no indicators: only its logs and traces show it
+               3 more in scope, outside the conclusion
+impact         not checked: no impact flows in scope
+
+evidence       functionality:checkout      r1 kpi anomalous
+               flow:place-order            r2 latency breached
+               step:place-order#1          r4 errors anomalous · r5 latency anomalous
+               step:place-order#3          r10 latency anomalous
+               component:checkout          r17 r18 saturation anomalous · r23 logs 4 new, 1 surging
+               component:orders-pg         r19 saturation breached · r20 r21 saturation anomalous · r24 logs 4 new
+               component:orders-reconcile  r22 logs 2 new
+
+redaction      829 records · 1030 fields dropped · no secrets matched
+  dropped      component:checkout: attempt, cart_id, code, customer, db.query.text, db_ms, db_system, in_use, items, max, method, pending, provider, route, sku, status, threshold_ms, waited_ms
+  dropped      component:orders-reconcile: batch, ledger_ms, page, rows
+
+usage          3 turns · 3 tool calls · 79 queries · 6000 in / 900 out tokens · 0.0s

@@ -166,23 +166,10 @@ Prometheus is required. A missing Loki or Tempo source only fails the checks tha
 The remaining `AGENT_*` limits (tool calls, tokens, concurrency) are in
 [ADR 0017](../adr/0017-agent-runtime-loop-tools-budgets-tracing.md).
 
-**The report** (`--json`, and the `investigation.concluded` event) carries:
-- the plan
-- the outcome (`cause-found`, `no-signal`, `inconclusive`)
-- the conclusion: summary, cause, origin, verdicts, evidence, confidence, mitigations
-- every result. Each one has a `kind`:
-  - `indicator`: shape in [health-evaluation.md](../design/health-evaluation.md#what-the-agent-receives)
-  - `logs`, `traces` or `trace`: shape in [log-and-trace-evidence.md](../design/log-and-trace-evidence.md#what-the-agent-receives)
-- `redaction`:
-  - `totals`: the counts the agent saw
-  - `droppedFields`: the names of the fields the allowlist dropped, per subject. **They are in
-    this local report only**, never sent to the model or exported as telemetry (ADR 0008).
-- the pruned vertices looked at, with their reasons
-- usage: turns, tool calls, queries, tokens, time
-- the trace id, when tracing is on
-- `transcript`: the path of this run's transcript, when one was recorded
-
-Text prints it after the plan.
+**The report** (text after the plan, `--json`, and the `investigation.concluded` event) is
+specified in [investigation-report.md](investigation-report.md): the conclusion, key figures with
+the profile of each spike, the blind spots it leans on, impact, every result, redaction and usage.
+`heimdall report` shows a recorded run's report again.
 
 **Every run is recorded** to `~/.heimdall/runs/`, redacted. `heimdall replay <transcript>`
 replays a run with no model and no backend, and reports where today's code makes it differ. It

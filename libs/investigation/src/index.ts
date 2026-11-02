@@ -24,15 +24,23 @@ export {
   DeviationDirection,
   ObjectiveVerdict,
   PreliminarySignal,
+  ProfileShape,
+  ProfileState,
 } from './execution/health/health.enums';
+export type { IProfile } from './execution/health/profile.summariser';
+export { QueryUnit } from './execution/queries/promql.compiler';
 export {
   InvestigationExecutionService,
   type IExecuteOptions,
 } from './execution/investigation-execution.service';
 export type {
   IInvestigationReport,
+  IReportBlindSpot,
+  IReportImpact,
+  IReportImpactSubject,
   IReportRedaction,
 } from './execution/investigation-report.interface';
+export { BlindSpotTouch, ImpactStatus, ReportSchemaVersion } from './execution/report/report.enums';
 export type { IDroppedFields, IReachedPruned } from './execution/execution.session';
 export { InvestigationTool } from './execution/tools/investigation-tool.enum';
 export { InvestigationInitService } from './investigation-init.service';

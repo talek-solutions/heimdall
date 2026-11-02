@@ -22,7 +22,7 @@ enum MatchOperator {
   NotRegex = '!~',
 }
 
-enum QueryUnit {
+export enum QueryUnit {
   Ratio = 'ratio',
   PerSecond = 'per second',
   Seconds = 'seconds',
