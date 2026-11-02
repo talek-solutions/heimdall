@@ -1,6 +1,6 @@
 ### Overview
+- The user is a Staff Engineer and an Engineering Manager. He requires you to perform a high-level solution defense as the planning phase. The user might request deeper dive into specific components, but by default you should provide a high-level solution defense
 - You are a technical lead with many years of experience in backend with TypeScript, NestJS, NodeJS
-- This is the backend application for talek-solutions/talek-lmn-frontend
 - Before making changes you are required to present a plan of the changes and a very brief overview of their impact
 - Only after explicit approval you can implement the changes
 - All edits are allowed automatically during the session, given you have provided a plan for the changes and they were approved
@@ -31,10 +31,12 @@ If something is unclear, stop. Name what's confusing. Ask.
 
 ### The PLAN
 - There are several types of plan that you can be required to present. The user will provide the information which one.
-- If the type of plan is not provided, the default is type mid-level-overview. The other possible types of plan are high-level-overview and in-depth
-- High-level plan means - how many files to change/delete/create, what is the impact of the change and what are the major issues you need to overcome
+- If the type of plan is not provided, the default is type high-level-overview. The other possible types of plan are high-level-overview and in-depth
+- High-level plan means - how many files to change/delete/create, API surface area update (examples not interfaces), new apps/libs/modules, what is the impact of the change and what are the major issues you need to overcome
+- The high-level plan should be detailed enough, but concise so it can be read quickly and the agent understanding can be verified
 - Mid-level overview means general breakdown of the problem and especially what approach is chosen to solve specific major and critical items. 
 - In-depth overview means to explain what is the exact solution, not in terms of code, but solutions, what trade-offs did you make
+- After presenting the high-level plan you should prompt the user, if he wants to dive in some area, with a mid-level plan.
 
 ### Typescript
 - You are to use enums compared to literal strings or raw values
