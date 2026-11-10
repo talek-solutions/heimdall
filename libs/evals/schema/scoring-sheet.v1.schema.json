@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heimdall:schema:scoring-sheet:v1",
+  "title": "Heimdall scoring sheet, version 1",
+  "description": "A run to hand-score: `~/.heimdall/evals/<time>/sheets/<case>-<n>.score.yaml`, parsed from YAML (ADR 0019). Objects allow unknown properties. A file without `version` is version 1.",
+  "type": "object",
+  "properties": {
+    "version": { "const": 1 },
+    "case": { "type": "string" },
+    "run": {
+      "description": "The run's transcript path, or its case and repeat when none was recorded.",
+      "type": "string"
+    },
+    "judgeInput": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "object",
+          "properties": {
+            "outcome": { "enum": ["cause-found", "no-signal", "inconclusive"] },
+            "origin": { "type": "string" },
+            "cause": { "type": "string" },
+            "mechanism": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["outcome", "mechanism", "evidence"]
+        },
+        "conclusion": { "description": "The report's conclusion, as the judge was shown it." },
+        "citedResults": { "type": "array" }
+      },
+      "required": ["reference", "conclusion", "citedResults"]
+    },
+    "human": {
+      "description": "Blank (null) until a person scores it.",
+      "type": "object",
+      "properties": {
+        "component": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 2 }, { "type": "null" }] },
+        "mechanism": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 2 }, { "type": "null" }] },
+        "evidence": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 2 }, { "type": "null" }] }
+      },
+      "required": ["component", "mechanism", "evidence"]
+    },
+    "note": { "type": "string" }
+  },
+  "required": ["case", "run", "judgeInput", "human"]
+}

@@ -1,0 +1,1114 @@
+{
+  "version": 1,
+  "meta": {
+    "heimdall": "0.0.0",
+    "recordedAt": "2026-10-18T16:33:07.521Z",
+    "command": {"query":"checkout is slow","entry":"functionality:checkout","planOnly":true},
+    "manifest": {
+      "sha256": "d2f1d7b1df60d339d413a41f55b9b048c8498fe39aba150586c1562c4b3733af",
+      "content": "# Reference system manifest shaped after the telemetry fixture scenarios in\n# libs/telemetry/scenarios (error-burst-30s, increased-latency-1, healthy-baseline): the\n# same services, metric names and labels, so an investigation can run end to end against\n# fixtures. See README.md in this folder.\napiVersion: heimdall/v1\nkind: System\nmetadata: { name: storefront }\nspec:\n  description: Web checkout with stock reservation and card payments\n  environments:\n    - name: prod\n      context: prod\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: web, system: storefront }\nspec:\n  type: frontend\n  description: The storefront in the browser; emits no telemetry of its own\n  dependsOn:\n    - name: checkout-api\n      target: checkout\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /api/checkout']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: checkout, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /api/checkout }\n  telemetry:\n    # Mapped fields are the only ones that reach the model (ADR 0008): dsn, customer and\n    # authorization stay unmapped on purpose.\n    logs:\n      selector: '{service_name=\"checkout\"}'\n      fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId, error: error, operation: operation, table: table, duration_ms: durationMs, pool: pool }\n    metrics: { matchers: { service: checkout } }\n    traces: { serviceName: checkout }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: db_client_operation_duration_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { db_operation_name: operation, db_collection_name: table } }\n    - { name: db_client_connections_usage, type: gauge, role: saturation, description: Connections in use in the orders-pg pool }\n    - { name: db_client_connections_pending_requests, type: gauge, role: saturation, description: Requests waiting for an orders-pg connection }\n  dependsOn:\n    - name: reserve-stock\n      target: inventory\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /reserve']\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n      config: { poolSize: 50 }\n    - name: charge\n      target: payments\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /charges']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payments, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /charges }\n  telemetry:\n    logs: { selector: '{service_name=\"payments\"}', fields: { level: severity, msg: message, trace_id: traceId, payment_id: paymentId } }\n    metrics: { matchers: { service: payments } }\n    traces: { serviceName: payments }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: http_client_request_duration_seconds, type: histogram, unit: seconds, measures: { outbound: provider }, labels: { http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: provider\n      target: payment-provider\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /v1/payment_intents']\n      config: { maxAttempts: 3 }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: inventory, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /reserve }\n  telemetry:\n    logs: { selector: '{service_name=\"inventory\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { service: inventory } }\n    traces: { serviceName: inventory }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: stock-cache\n      target: stock-cache\n      transport: redis\n      mode: sync\n      criticality: soft\n      role: cache-aside\n      operations: [GET]\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: stock-cache, system: storefront }\nspec:\n  type: cache\n  engine: redis\n  description: Stock levels cached in front of inventory's own database\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payment-provider, system: storefront }\nspec:\n  type: vendor\n  description: External card processor at api.stripe.com; observed only through payments' client metrics\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-pg, system: storefront }\nspec:\n  type: datastore\n  engine: postgresql\n  telemetry:\n    logs: { selector: '{service_name=\"orders-pg\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { datname: orders } }\n  dataModel:\n    - { kind: table, name: orders }\n  metrics:\n    - { name: pg_stat_activity_count, type: gauge, role: saturation }\n    - { name: pg_locks_count, type: gauge, role: saturation }\n    - { name: pg_stat_activity_max_tx_duration, type: gauge, unit: seconds }\n  indicators:\n    - { metric: pg_stat_activity_max_tx_duration, role: saturation, expect: { kind: threshold, max: 30 } }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-reconcile, system: storefront }\nspec:\n  type: worker\n  description: Periodic batch job reconciling orders against payments\n  telemetry:\n    logs: { selector: '{service_name=\"orders-reconcile\"}', fields: { level: severity, msg: message, table: table, isolation: isolation, tx_open_seconds: txOpenSeconds } }\n  dependsOn:\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n---\napiVersion: heimdall/v1\nkind: Functionality\nmetadata: { name: checkout, system: storefront }\nspec:\n  description: Customers pay for their cart and an order is placed\n  flows: [place-order]\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: kpi, expect: { kind: baseline }, description: Checkout requests served }\n---\napiVersion: heimdall/v1\nkind: Flow\nmetadata: { name: place-order, system: storefront }\nspec:\n  description: The browser submits the cart; checkout reserves stock, records the order and charges the card\n  mode: sync\n  steps:\n    - { dependency: web/checkout-api, match: { route: /api/checkout, method: POST } }\n    - { dependency: checkout/reserve-stock, match: { route: /reserve, method: POST } }\n    - { dependency: checkout/orders-db, match: { operation: UPDATE, table: orders } }\n    - { dependency: checkout/charge, match: { route: /charges, method: POST } }\n    - { dependency: payments/provider, match: { method: POST } }\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: latency, expect: { kind: slo, p99: 1 } }\n"
+    },
+    "datasources": {
+      "datasources": {"prometheus":"fixture","loki":"fixture","tempo":"fixture"},
+      "fixture": {"scenario":"increased-latency-1","anchor":"2026-10-18T16:33:00.000Z"}
+    }
+  },
+  "environment": {
+    "variables": {
+      "LOKI_DATASOURCE_TYPE": "fixture",
+      "PROMETHEUS_DATASOURCE_TYPE": "fixture",
+      "TELEMETRY_FIXTURE_SCENARIO": "increased-latency-1",
+      "TEMPO_DATASOURCE_TYPE": "fixture"
+    }
+  },
+  "pins": {"now":{"value":"2026-10-18T16:33:00.000Z"}},
+  "model": [],
+  "telemetry": [],
+  "outcome": {
+    "events": [
+      {
+        "type": "investigation.started",
+        "query": "checkout is slow",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-18T15:33:00.000Z",
+          "end": "2026-10-18T16:33:00.000Z",
+          "baseline": {"start":"2026-10-18T14:33:00.000Z","end":"2026-10-18T15:33:00.000Z"}
+        }
+      },
+      {
+        "type": "investigation.symptom_classified",
+        "symptom": {"roles":["throughput","errors","latency","saturation","lag","kpi"],"method":"unclassified"}
+      },
+      {
+        "type": "investigation.entry_located",
+        "entry": {"vertex":"functionality:checkout","type":"functionality","method":"flag","candidates":[]}
+      },
+      {
+        "type": "investigation.scope_resolved",
+        "scope": {
+          "suspectFlows": ["flow:place-order"],
+          "impactFlows": [],
+          "vertices": [
+            {"vertex":"functionality:checkout","reason":"entry"},
+            {"vertex":"flow:place-order","reason":"suspect-flow"},
+            {"vertex":"step:place-order#1","reason":"step"},
+            {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+            {"vertex":"component:web","reason":"path-component"},
+            {"vertex":"component:checkout","reason":"path-component"},
+            {"vertex":"step:place-order#2","reason":"step"},
+            {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+            {"vertex":"component:inventory","reason":"path-component"},
+            {"vertex":"step:place-order#3","reason":"step"},
+            {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+            {"vertex":"component:orders-pg","reason":"path-component"},
+            {"vertex":"step:place-order#4","reason":"step"},
+            {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+            {"vertex":"component:payments","reason":"path-component"},
+            {"vertex":"step:place-order#5","reason":"step"},
+            {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+            {"vertex":"component:payment-provider","reason":"path-component"},
+            {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+            {"vertex":"component:stock-cache","reason":"neighbour"},
+            {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+            {"vertex":"component:orders-reconcile","reason":"contention"}
+          ],
+          "pruned": []
+        }
+      },
+      {
+        "type": "investigation.plan_ready",
+        "plan": {
+          "query": "checkout is slow",
+          "system": "storefront",
+          "environment": {"name":"prod","context":"prod"},
+          "window": {
+            "start": "2026-10-18T15:33:00.000Z",
+            "end": "2026-10-18T16:33:00.000Z",
+            "baseline": {"start":"2026-10-18T14:33:00.000Z","end":"2026-10-18T15:33:00.000Z"}
+          },
+          "symptom": {
+            "roles": ["throughput","errors","latency","saturation","lag","kpi"],
+            "method": "unclassified"
+          },
+          "entry": {"vertex":"functionality:checkout","type":"functionality","method":"flag","candidates":[]},
+          "scope": {
+            "suspectFlows": ["flow:place-order"],
+            "impactFlows": [],
+            "vertices": [
+              {"vertex":"functionality:checkout","reason":"entry"},
+              {"vertex":"flow:place-order","reason":"suspect-flow"},
+              {"vertex":"step:place-order#1","reason":"step"},
+              {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+              {"vertex":"component:web","reason":"path-component"},
+              {"vertex":"component:checkout","reason":"path-component"},
+              {"vertex":"step:place-order#2","reason":"step"},
+              {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+              {"vertex":"component:inventory","reason":"path-component"},
+              {"vertex":"step:place-order#3","reason":"step"},
+              {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+              {"vertex":"component:orders-pg","reason":"path-component"},
+              {"vertex":"step:place-order#4","reason":"step"},
+              {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+              {"vertex":"component:payments","reason":"path-component"},
+              {"vertex":"step:place-order#5","reason":"step"},
+              {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+              {"vertex":"component:payment-provider","reason":"path-component"},
+              {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+              {"vertex":"component:stock-cache","reason":"neighbour"},
+              {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+              {"vertex":"component:orders-reconcile","reason":"contention"}
+            ],
+            "pruned": []
+          },
+          "checks": [
+            {
+              "id": "c1",
+              "tier": "confirm",
+              "kind": "indicator",
+              "subject": "functionality:checkout",
+              "indicator": {
+                "id": "indicator:functionality:checkout@1",
+                "type": "indicator",
+                "subject": "functionality:checkout",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["kpi"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "declared",
+                "description": "Checkout requests served"
+              },
+              "roles": ["kpi"],
+              "rationale": "Confirms the symptom and when it started"
+            },
+            {
+              "id": "c2",
+              "tier": "confirm",
+              "kind": "indicator",
+              "subject": "flow:place-order",
+              "indicator": {
+                "id": "indicator:flow:place-order@1",
+                "type": "indicator",
+                "subject": "flow:place-order",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["latency"],
+                "expect": {"kind":"slo","p99":1},
+                "selector": {},
+                "provenance": "declared"
+              },
+              "roles": ["latency"],
+              "rationale": "End to end place-order: confirms the symptom and when it started"
+            },
+            {
+              "id": "c3",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#1",
+              "indicator": {
+                "id": "indicator:step:place-order#1@1",
+                "type": "indicator",
+                "subject": "step:place-order#1",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/api/checkout","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 1 of place-order: web → checkout over http (POST /api/checkout)"
+            },
+            {
+              "id": "c4",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#2",
+              "indicator": {
+                "id": "indicator:step:place-order#2@1",
+                "type": "indicator",
+                "subject": "step:place-order#2",
+                "metric": "inventory/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/reserve","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 2 of place-order: checkout → inventory over http (POST /reserve)"
+            },
+            {
+              "id": "c5",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#3",
+              "indicator": {
+                "id": "indicator:step:place-order#3@1",
+                "type": "indicator",
+                "subject": "step:place-order#3",
+                "metric": "checkout/db_client_operation_duration_seconds",
+                "roles": ["throughput","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"operation":"UPDATE","table":"orders"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","latency"],
+              "rationale": "Step 3 of place-order: checkout → orders-pg over sql (UPDATE orders)"
+            },
+            {
+              "id": "c6",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#4",
+              "indicator": {
+                "id": "indicator:step:place-order#4@1",
+                "type": "indicator",
+                "subject": "step:place-order#4",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/charges","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 4 of place-order: checkout → payments over http (POST /charges)"
+            },
+            {
+              "id": "c7",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#5",
+              "indicator": {
+                "id": "indicator:step:place-order#5@1",
+                "type": "indicator",
+                "subject": "step:place-order#5",
+                "metric": "payments/http_client_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 5 of place-order: payments → payment-provider over http (POST)"
+            },
+            {
+              "id": "c8",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@1",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c9",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@2",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_usage",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {
+                "failingSteps": [
+                  "step:place-order#1",
+                  "step:place-order#2",
+                  "step:place-order#3",
+                  "step:place-order#4"
+                ]
+              },
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c10",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@3",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_pending_requests",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {
+                "failingSteps": [
+                  "step:place-order#1",
+                  "step:place-order#2",
+                  "step:place-order#3",
+                  "step:place-order#4"
+                ]
+              },
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c11",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:inventory",
+              "indicator": {
+                "id": "indicator:component:inventory@1",
+                "type": "indicator",
+                "subject": "component:inventory",
+                "metric": "inventory/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#2"]},
+              "rationale": "checkout depends on inventory (hard)"
+            },
+            {
+              "id": "c12",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@1",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_stat_activity_max_tx_duration",
+                "roles": ["saturation"],
+                "expect": {"kind":"threshold","max":30},
+                "selector": {},
+                "provenance": "declared"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c13",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@2",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_stat_activity_count",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c14",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@3",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_locks_count",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c15",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:payments",
+              "indicator": {
+                "id": "indicator:component:payments@1",
+                "type": "indicator",
+                "subject": "component:payments",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#4"]},
+              "rationale": "checkout depends on payments (hard)"
+            },
+            {
+              "id": "c16",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/api/checkout","method":"POST"},
+              "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c17",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/api/checkout","method":"POST"},
+              "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c18",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c19",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:inventory",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Logs of inventory around the hop"
+            },
+            {
+              "id": "c20",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c21",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:inventory",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Spans of inventory for the hop"
+            },
+            {
+              "id": "c22",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:orders-reconcile",
+              "roles": [],
+              "hop": {"dependency":"dependency:orders-reconcile/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of orders-reconcile: orders-reconcile also uses orders-pg"
+            },
+            {
+              "id": "c23",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c24",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:orders-pg",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"target"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of orders-pg around the hop"
+            },
+            {
+              "id": "c25",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c26",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c27",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Logs of payments around the hop"
+            },
+            {
+              "id": "c28",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c29",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Spans of payments for the hop"
+            },
+            {
+              "id": "c30",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"method":"POST"},
+              "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+              "when": {"failingSteps":["step:place-order#5"]},
+              "rationale": "Logs of payments around the hop"
+            },
+            {
+              "id": "c31",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"method":"POST"},
+              "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+              "when": {"failingSteps":["step:place-order#5"]},
+              "rationale": "Spans of payments for the hop"
+            }
+          ],
+          "blindSpots": [
+            {"vertex":"component:web","reason":"no-telemetry"},
+            {"vertex":"component:payment-provider","reason":"no-telemetry"},
+            {"vertex":"component:stock-cache","reason":"no-telemetry"},
+            {"vertex":"component:orders-reconcile","reason":"no-indicators"}
+          ],
+          "omittedChecks": 0
+        }
+      }
+    ],
+    "plan": {
+      "query": "checkout is slow",
+      "system": "storefront",
+      "environment": {"name":"prod","context":"prod"},
+      "window": {
+        "start": "2026-10-18T15:33:00.000Z",
+        "end": "2026-10-18T16:33:00.000Z",
+        "baseline": {"start":"2026-10-18T14:33:00.000Z","end":"2026-10-18T15:33:00.000Z"}
+      },
+      "symptom": {"roles":["throughput","errors","latency","saturation","lag","kpi"],"method":"unclassified"},
+      "entry": {"vertex":"functionality:checkout","type":"functionality","method":"flag","candidates":[]},
+      "scope": {
+        "suspectFlows": ["flow:place-order"],
+        "impactFlows": [],
+        "vertices": [
+          {"vertex":"functionality:checkout","reason":"entry"},
+          {"vertex":"flow:place-order","reason":"suspect-flow"},
+          {"vertex":"step:place-order#1","reason":"step"},
+          {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+          {"vertex":"component:web","reason":"path-component"},
+          {"vertex":"component:checkout","reason":"path-component"},
+          {"vertex":"step:place-order#2","reason":"step"},
+          {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+          {"vertex":"component:inventory","reason":"path-component"},
+          {"vertex":"step:place-order#3","reason":"step"},
+          {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+          {"vertex":"component:orders-pg","reason":"path-component"},
+          {"vertex":"step:place-order#4","reason":"step"},
+          {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+          {"vertex":"component:payments","reason":"path-component"},
+          {"vertex":"step:place-order#5","reason":"step"},
+          {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+          {"vertex":"component:payment-provider","reason":"path-component"},
+          {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+          {"vertex":"component:stock-cache","reason":"neighbour"},
+          {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+          {"vertex":"component:orders-reconcile","reason":"contention"}
+        ],
+        "pruned": []
+      },
+      "checks": [
+        {
+          "id": "c1",
+          "tier": "confirm",
+          "kind": "indicator",
+          "subject": "functionality:checkout",
+          "indicator": {
+            "id": "indicator:functionality:checkout@1",
+            "type": "indicator",
+            "subject": "functionality:checkout",
+            "metric": "checkout/http_server_request_duration_seconds",
+            "roles": ["kpi"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "declared",
+            "description": "Checkout requests served"
+          },
+          "roles": ["kpi"],
+          "rationale": "Confirms the symptom and when it started"
+        },
+        {
+          "id": "c2",
+          "tier": "confirm",
+          "kind": "indicator",
+          "subject": "flow:place-order",
+          "indicator": {
+            "id": "indicator:flow:place-order@1",
+            "type": "indicator",
+            "subject": "flow:place-order",
+            "metric": "checkout/http_server_request_duration_seconds",
+            "roles": ["latency"],
+            "expect": {"kind":"slo","p99":1},
+            "selector": {},
+            "provenance": "declared"
+          },
+          "roles": ["latency"],
+          "rationale": "End to end place-order: confirms the symptom and when it started"
+        },
+        {
+          "id": "c3",
+          "tier": "localise",
+          "kind": "indicator",
+          "subject": "step:place-order#1",
+          "indicator": {
+            "id": "indicator:step:place-order#1@1",
+            "type": "indicator",
+            "subject": "step:place-order#1",
+            "metric": "checkout/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {"route":"/api/checkout","method":"POST"},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "rationale": "Step 1 of place-order: web → checkout over http (POST /api/checkout)"
+        },
+        {
+          "id": "c4",
+          "tier": "localise",
+          "kind": "indicator",
+          "subject": "step:place-order#2",
+          "indicator": {
+            "id": "indicator:step:place-order#2@1",
+            "type": "indicator",
+            "subject": "step:place-order#2",
+            "metric": "inventory/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {"route":"/reserve","method":"POST"},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "rationale": "Step 2 of place-order: checkout → inventory over http (POST /reserve)"
+        },
+        {
+          "id": "c5",
+          "tier": "localise",
+          "kind": "indicator",
+          "subject": "step:place-order#3",
+          "indicator": {
+            "id": "indicator:step:place-order#3@1",
+            "type": "indicator",
+            "subject": "step:place-order#3",
+            "metric": "checkout/db_client_operation_duration_seconds",
+            "roles": ["throughput","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {"operation":"UPDATE","table":"orders"},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","latency"],
+          "rationale": "Step 3 of place-order: checkout → orders-pg over sql (UPDATE orders)"
+        },
+        {
+          "id": "c6",
+          "tier": "localise",
+          "kind": "indicator",
+          "subject": "step:place-order#4",
+          "indicator": {
+            "id": "indicator:step:place-order#4@1",
+            "type": "indicator",
+            "subject": "step:place-order#4",
+            "metric": "payments/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {"route":"/charges","method":"POST"},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "rationale": "Step 4 of place-order: checkout → payments over http (POST /charges)"
+        },
+        {
+          "id": "c7",
+          "tier": "localise",
+          "kind": "indicator",
+          "subject": "step:place-order#5",
+          "indicator": {
+            "id": "indicator:step:place-order#5@1",
+            "type": "indicator",
+            "subject": "step:place-order#5",
+            "metric": "payments/http_client_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {"method":"POST"},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "rationale": "Step 5 of place-order: payments → payment-provider over http (POST)"
+        },
+        {
+          "id": "c8",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:checkout",
+          "indicator": {
+            "id": "indicator:component:checkout@1",
+            "type": "indicator",
+            "subject": "component:checkout",
+            "metric": "checkout/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "when": {"failingSteps":["step:place-order#1"]},
+          "rationale": "checkout serves the failing hop"
+        },
+        {
+          "id": "c9",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:checkout",
+          "indicator": {
+            "id": "indicator:component:checkout@2",
+            "type": "indicator",
+            "subject": "component:checkout",
+            "metric": "checkout/db_client_connections_usage",
+            "roles": ["saturation"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["saturation"],
+          "when": {
+            "failingSteps": ["step:place-order#1","step:place-order#2","step:place-order#3","step:place-order#4"]
+          },
+          "rationale": "checkout serves the failing hop"
+        },
+        {
+          "id": "c10",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:checkout",
+          "indicator": {
+            "id": "indicator:component:checkout@3",
+            "type": "indicator",
+            "subject": "component:checkout",
+            "metric": "checkout/db_client_connections_pending_requests",
+            "roles": ["saturation"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["saturation"],
+          "when": {
+            "failingSteps": ["step:place-order#1","step:place-order#2","step:place-order#3","step:place-order#4"]
+          },
+          "rationale": "checkout serves the failing hop"
+        },
+        {
+          "id": "c11",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:inventory",
+          "indicator": {
+            "id": "indicator:component:inventory@1",
+            "type": "indicator",
+            "subject": "component:inventory",
+            "metric": "inventory/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "when": {"failingSteps":["step:place-order#1","step:place-order#2"]},
+          "rationale": "checkout depends on inventory (hard)"
+        },
+        {
+          "id": "c12",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:orders-pg",
+          "indicator": {
+            "id": "indicator:component:orders-pg@1",
+            "type": "indicator",
+            "subject": "component:orders-pg",
+            "metric": "orders-pg/pg_stat_activity_max_tx_duration",
+            "roles": ["saturation"],
+            "expect": {"kind":"threshold","max":30},
+            "selector": {},
+            "provenance": "declared"
+          },
+          "roles": ["saturation"],
+          "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+          "rationale": "checkout depends on orders-pg (hard)"
+        },
+        {
+          "id": "c13",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:orders-pg",
+          "indicator": {
+            "id": "indicator:component:orders-pg@2",
+            "type": "indicator",
+            "subject": "component:orders-pg",
+            "metric": "orders-pg/pg_stat_activity_count",
+            "roles": ["saturation"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["saturation"],
+          "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+          "rationale": "checkout depends on orders-pg (hard)"
+        },
+        {
+          "id": "c14",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:orders-pg",
+          "indicator": {
+            "id": "indicator:component:orders-pg@3",
+            "type": "indicator",
+            "subject": "component:orders-pg",
+            "metric": "orders-pg/pg_locks_count",
+            "roles": ["saturation"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["saturation"],
+          "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+          "rationale": "checkout depends on orders-pg (hard)"
+        },
+        {
+          "id": "c15",
+          "tier": "explain",
+          "kind": "indicator",
+          "subject": "component:payments",
+          "indicator": {
+            "id": "indicator:component:payments@1",
+            "type": "indicator",
+            "subject": "component:payments",
+            "metric": "payments/http_server_request_duration_seconds",
+            "roles": ["throughput","errors","latency"],
+            "expect": {"kind":"baseline"},
+            "selector": {},
+            "provenance": "derived"
+          },
+          "roles": ["throughput","errors","latency"],
+          "when": {"failingSteps":["step:place-order#1","step:place-order#4"]},
+          "rationale": "checkout depends on payments (hard)"
+        },
+        {
+          "id": "c16",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/api/checkout","method":"POST"},
+          "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+          "when": {"failingSteps":["step:place-order#1"]},
+          "rationale": "Logs of checkout around the hop"
+        },
+        {
+          "id": "c17",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/api/checkout","method":"POST"},
+          "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+          "when": {"failingSteps":["step:place-order#1"]},
+          "rationale": "Spans of checkout for the hop"
+        },
+        {
+          "id": "c18",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/reserve","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+          "when": {"failingSteps":["step:place-order#2"]},
+          "rationale": "Logs of checkout around the hop"
+        },
+        {
+          "id": "c19",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:inventory",
+          "roles": [],
+          "match": {"route":"/reserve","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+          "when": {"failingSteps":["step:place-order#2"]},
+          "rationale": "Logs of inventory around the hop"
+        },
+        {
+          "id": "c20",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/reserve","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+          "when": {"failingSteps":["step:place-order#2"]},
+          "rationale": "Spans of checkout for the hop"
+        },
+        {
+          "id": "c21",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:inventory",
+          "roles": [],
+          "match": {"route":"/reserve","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+          "when": {"failingSteps":["step:place-order#2"]},
+          "rationale": "Spans of inventory for the hop"
+        },
+        {
+          "id": "c22",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:orders-reconcile",
+          "roles": [],
+          "hop": {"dependency":"dependency:orders-reconcile/orders-db","side":"caller"},
+          "when": {"failingSteps":["step:place-order#3"]},
+          "rationale": "Logs of orders-reconcile: orders-reconcile also uses orders-pg"
+        },
+        {
+          "id": "c23",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"operation":"UPDATE","table":"orders"},
+          "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+          "when": {"failingSteps":["step:place-order#3"]},
+          "rationale": "Logs of checkout around the hop"
+        },
+        {
+          "id": "c24",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:orders-pg",
+          "roles": [],
+          "match": {"operation":"UPDATE","table":"orders"},
+          "hop": {"dependency":"dependency:checkout/orders-db","side":"target"},
+          "when": {"failingSteps":["step:place-order#3"]},
+          "rationale": "Logs of orders-pg around the hop"
+        },
+        {
+          "id": "c25",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"operation":"UPDATE","table":"orders"},
+          "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+          "when": {"failingSteps":["step:place-order#3"]},
+          "rationale": "Spans of checkout for the hop"
+        },
+        {
+          "id": "c26",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/charges","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+          "when": {"failingSteps":["step:place-order#4"]},
+          "rationale": "Logs of checkout around the hop"
+        },
+        {
+          "id": "c27",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:payments",
+          "roles": [],
+          "match": {"route":"/charges","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+          "when": {"failingSteps":["step:place-order#4"]},
+          "rationale": "Logs of payments around the hop"
+        },
+        {
+          "id": "c28",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:checkout",
+          "roles": [],
+          "match": {"route":"/charges","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+          "when": {"failingSteps":["step:place-order#4"]},
+          "rationale": "Spans of checkout for the hop"
+        },
+        {
+          "id": "c29",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:payments",
+          "roles": [],
+          "match": {"route":"/charges","method":"POST"},
+          "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+          "when": {"failingSteps":["step:place-order#4"]},
+          "rationale": "Spans of payments for the hop"
+        },
+        {
+          "id": "c30",
+          "tier": "corroborate",
+          "kind": "logs",
+          "subject": "component:payments",
+          "roles": [],
+          "match": {"method":"POST"},
+          "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+          "when": {"failingSteps":["step:place-order#5"]},
+          "rationale": "Logs of payments around the hop"
+        },
+        {
+          "id": "c31",
+          "tier": "corroborate",
+          "kind": "traces",
+          "subject": "component:payments",
+          "roles": [],
+          "match": {"method":"POST"},
+          "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+          "when": {"failingSteps":["step:place-order#5"]},
+          "rationale": "Spans of payments for the hop"
+        }
+      ],
+      "blindSpots": [
+        {"vertex":"component:web","reason":"no-telemetry"},
+        {"vertex":"component:payment-provider","reason":"no-telemetry"},
+        {"vertex":"component:stock-cache","reason":"no-telemetry"},
+        {"vertex":"component:orders-reconcile","reason":"no-indicators"}
+      ],
+      "omittedChecks": 0
+    }
+  }
+}

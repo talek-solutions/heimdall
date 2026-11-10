@@ -37,7 +37,12 @@ heimdall eval ─▶ libs/evals/golden/*.yaml ─▶ child per case: heimdall in
 
 ## The transcript
 
-One JSON file per run.
+One JSON file per run. Its published contract for readers outside this repository is
+[`transcript.v1.schema.json`](../../libs/transcript/schema/transcript.v1.schema.json), which names
+the report's schema by id
+([ADR 0019](../adr/0019-published-schemas-for-transcripts-and-scorecards.md),
+[ADR 0021](../adr/0021-schemas-are-identified-and-referenced-by-urn.md)). A change to what is
+written here is a change to that schema, in the same commit.
 
 | Section | Holds |
 |---|---|

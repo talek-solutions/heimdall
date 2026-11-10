@@ -38,3 +38,11 @@ Statuses are those of the product stories: `done`, `in progress`, `planned`, `se
 | [0018-02](0018-investigation-execution/02-logs-and-traces-evidence.md) | Logs and traces evidence, with redaction | done |
 | [0018-03](0018-investigation-execution/03-mitigations-and-report.md) | Mitigations and report | in progress |
 | [0018-04](0018-investigation-execution/04-replay-and-golden-evals.md) | Replay and golden evaluations | in progress |
+
+### [0019 — Published schemas](0019-published-schemas/)
+
+| # | Title | Status |
+|---|---|---|
+| [0019-01](0019-published-schemas/01-schemas-and-the-pinning-spec.md) | Schemas and the pinning spec | done |
+| [0019-02](0019-published-schemas/02-run-identity-and-atomic-writes.md) | Run identity and atomic writes | planned |
+| [0019-03](0019-published-schemas/03-source-call-linked-to-its-result.md) | Source call linked to its result | planned |

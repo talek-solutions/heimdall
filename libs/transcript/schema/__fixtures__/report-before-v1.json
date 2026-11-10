@@ -1,0 +1,3069 @@
+{
+  "version": 1,
+  "meta": {
+    "heimdall": "0.0.0",
+    "recordedAt": "2026-10-31T19:06:51.087Z",
+    "command": {"query":"checkouts are not working","since":"2m","planOnly":false},
+    "manifest": {
+      "sha256": "d2f1d7b1df60d339d413a41f55b9b048c8498fe39aba150586c1562c4b3733af",
+      "content": "# Reference system manifest shaped after the telemetry fixture scenarios in\n# libs/telemetry/scenarios (error-burst-30s, increased-latency-1, healthy-baseline): the\n# same services, metric names and labels, so an investigation can run end to end against\n# fixtures. See README.md in this folder.\napiVersion: heimdall/v1\nkind: System\nmetadata: { name: storefront }\nspec:\n  description: Web checkout with stock reservation and card payments\n  environments:\n    - name: prod\n      context: prod\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: web, system: storefront }\nspec:\n  type: frontend\n  description: The storefront in the browser; emits no telemetry of its own\n  dependsOn:\n    - name: checkout-api\n      target: checkout\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /api/checkout']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: checkout, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /api/checkout }\n  telemetry:\n    # Mapped fields are the only ones that reach the model (ADR 0008): dsn, customer and\n    # authorization stay unmapped on purpose.\n    logs:\n      selector: '{service_name=\"checkout\"}'\n      fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId, error: error, operation: operation, table: table, duration_ms: durationMs, pool: pool }\n    metrics: { matchers: { service: checkout } }\n    traces: { serviceName: checkout }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: db_client_operation_duration_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { db_operation_name: operation, db_collection_name: table } }\n    - { name: db_client_connections_usage, type: gauge, role: saturation, description: Connections in use in the orders-pg pool }\n    - { name: db_client_connections_pending_requests, type: gauge, role: saturation, description: Requests waiting for an orders-pg connection }\n  dependsOn:\n    - name: reserve-stock\n      target: inventory\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /reserve']\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n      config: { poolSize: 50 }\n    - name: charge\n      target: payments\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /charges']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payments, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /charges }\n  telemetry:\n    logs: { selector: '{service_name=\"payments\"}', fields: { level: severity, msg: message, trace_id: traceId, payment_id: paymentId } }\n    metrics: { matchers: { service: payments } }\n    traces: { serviceName: payments }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: http_client_request_duration_seconds, type: histogram, unit: seconds, measures: { outbound: provider }, labels: { http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: provider\n      target: payment-provider\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /v1/payment_intents']\n      config: { maxAttempts: 3 }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: inventory, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /reserve }\n  telemetry:\n    logs: { selector: '{service_name=\"inventory\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { service: inventory } }\n    traces: { serviceName: inventory }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: stock-cache\n      target: stock-cache\n      transport: redis\n      mode: sync\n      criticality: soft\n      role: cache-aside\n      operations: [GET]\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: stock-cache, system: storefront }\nspec:\n  type: cache\n  engine: redis\n  description: Stock levels cached in front of inventory's own database\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payment-provider, system: storefront }\nspec:\n  type: vendor\n  description: External card processor at api.stripe.com; observed only through payments' client metrics\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-pg, system: storefront }\nspec:\n  type: datastore\n  engine: postgresql\n  telemetry:\n    logs: { selector: '{service_name=\"orders-pg\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { datname: orders } }\n  dataModel:\n    - { kind: table, name: orders }\n  metrics:\n    - { name: pg_stat_activity_count, type: gauge, role: saturation }\n    - { name: pg_locks_count, type: gauge, role: saturation }\n    - { name: pg_stat_activity_max_tx_duration, type: gauge, unit: seconds }\n  indicators:\n    - { metric: pg_stat_activity_max_tx_duration, role: saturation, expect: { kind: threshold, max: 30 } }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-reconcile, system: storefront }\nspec:\n  type: worker\n  description: Periodic batch job reconciling orders against payments\n  telemetry:\n    logs: { selector: '{service_name=\"orders-reconcile\"}', fields: { level: severity, msg: message, table: table, isolation: isolation, tx_open_seconds: txOpenSeconds } }\n  dependsOn:\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n---\napiVersion: heimdall/v1\nkind: Functionality\nmetadata: { name: checkout, system: storefront }\nspec:\n  description: Customers pay for their cart and an order is placed\n  flows: [place-order]\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: kpi, expect: { kind: baseline }, description: Checkout requests served }\n---\napiVersion: heimdall/v1\nkind: Flow\nmetadata: { name: place-order, system: storefront }\nspec:\n  description: The browser submits the cart; checkout reserves stock, records the order and charges the card\n  mode: sync\n  steps:\n    - { dependency: web/checkout-api, match: { route: /api/checkout, method: POST } }\n    - { dependency: checkout/reserve-stock, match: { route: /reserve, method: POST } }\n    - { dependency: checkout/orders-db, match: { operation: UPDATE, table: orders } }\n    - { dependency: checkout/charge, match: { route: /charges, method: POST } }\n    - { dependency: payments/provider, match: { method: POST } }\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: latency, expect: { kind: slo, p99: 1 } }\n"
+    },
+    "datasources": {
+      "datasources": {"prometheus":"fixture","loki":"fixture","tempo":"fixture"},
+      "fixture": {"scenario":"error-burst-30s","anchor":"2026-10-17T08:00:00.000Z"}
+    }
+  },
+  "environment": {
+    "variables": {
+      "LOKI_DATASOURCE_TYPE": "fixture",
+      "PROMETHEUS_DATASOURCE_TYPE": "fixture",
+      "TELEMETRY_FIXTURE_ANCHOR": "2026-10-17T08:00:00.000Z",
+      "TELEMETRY_FIXTURE_SCENARIO": "error-burst-30s",
+      "TEMPO_DATASOURCE_TYPE": "fixture"
+    }
+  },
+  "pins": {
+    "now": {"value":"2026-10-17T08:00:00.000Z"},
+    "sources": {
+      "value": {
+        "metrics": {"url":"http://prometheus.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}},
+        "logs": {
+          "ok": true,
+          "source": {"url":"http://loki.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}}
+        },
+        "traces": {
+          "ok": true,
+          "source": {"url":"http://tempo.fixture.invalid","timeoutMs":30000,"auth":{"scheme":"none"}}
+        }
+      }
+    }
+  },
+  "model": [
+    {
+      "call": 1,
+      "request": {
+        "model": "claude-opus-5",
+        "system": "You locate the part of a software system that an incident report is about.\n\nYou receive the system's index: one line per functionality, flow, component and member, each starting with its id, followed by what it is and what it depends on. You also receive an engineer's report, in their own words.\n\nAnswer only by calling select_entry once.\n\ncandidates: ids from the index that the report is most likely about, best first, each with a confidence between 0 and 1 and a one-sentence reason. Prefer a functionality or flow when the report describes what users experience, and a component or member when it names infrastructure. Give a lower confidence when the report could mean several parts. Return no candidates when nothing in the index fits.\n\nsymptomRoles: the kinds of signal that would show the reported problem. errors: requests fail. throughput: traffic drops or stops. latency: things are slow or time out. saturation: a resource such as a pool, CPU or memory is exhausted. lag: queues, consumers or replicas fall behind. kpi: a business outcome moves.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Index:\nsystem storefront · env prod — Web checkout with stock reservation and card payments\nfunctionality:checkout — Customers pay for their cart and an order is placed | kpi checkout/http_server_request_duration_seconds ~baseline\n  flow:place-order  sync: web/checkout-api POST /api/checkout ▸ checkout/reserve-stock POST /reserve ▸ checkout/orders-db UPDATE orders ▸ checkout/charge POST /charges ▸ payments/provider POST — The browser submits the cart; checkout reserves stock, records the order and charges the card\ncomponent:web  frontend — The storefront in the browser; emits no telemetry of its own → checkout http sync hard\ncomponent:checkout  service → inventory http sync hard · orders-pg sql sync hard · payments http sync hard\ncomponent:payments  service → payment-provider http sync hard\ncomponent:inventory  service → stock-cache redis sync soft\ncomponent:stock-cache  cache redis — Stock levels cached in front of inventory's own database\ncomponent:payment-provider  vendor — External card processor at api.stripe.com; observed only through payments' client metrics\ncomponent:orders-pg  datastore postgresql\ncomponent:orders-reconcile  worker — Periodic batch job reconciling orders against payments → orders-pg sql sync hard\nnot on any flow: dependency:inventory/stock-cache, dependency:orders-reconcile/orders-db\n\nReport: checkouts are not working"
+          }
+        ],
+        "tools": [
+          {
+            "name": "select_entry",
+            "description": "Report which parts of the system the incident report is about, and how the problem would show.",
+            "strict": true,
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "candidates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "vertexId": {
+                        "type": "string",
+                        "enum": [
+                          "functionality:checkout",
+                          "flow:place-order",
+                          "component:web",
+                          "component:checkout",
+                          "component:payments",
+                          "component:inventory",
+                          "component:stock-cache",
+                          "component:payment-provider",
+                          "component:orders-pg",
+                          "component:orders-reconcile"
+                        ]
+                      },
+                      "confidence": {"type":"number","description":"Between 0 and 1."},
+                      "reason": {"type":"string"}
+                    },
+                    "required": ["vertexId","confidence","reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "symptomRoles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["throughput","errors","latency","saturation","lag","kpi"]
+                  }
+                }
+              },
+              "required": ["candidates","symptomRoles"],
+              "additionalProperties": false
+            }
+          }
+        ],
+        "toolChoice": {"type":"auto"},
+        "reasoning": {"effort":"low"},
+        "maxTokens": 4096
+      },
+      "response": {
+        "id": "msg_011CgaqbysZhkRRL1a9SLvjR",
+        "model": "claude-opus-5",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "toolu_018RFwYXRdHjsHuu4ZjFpTNA",
+            "name": "select_entry",
+            "input": {
+              "candidates": [
+                {
+                  "vertexId": "functionality:checkout",
+                  "confidence": 0.6,
+                  "reason": "Report is vague user-facing: customers cannot complete checkout."
+                },
+                {
+                  "vertexId": "flow:place-order",
+                  "confidence": 0.45,
+                  "reason": "The checkout submission path is the concrete flow that would be failing."
+                },
+                {
+                  "vertexId": "component:checkout",
+                  "confidence": 0.2,
+                  "reason": "The checkout service itself may be the failing component."
+                }
+              ],
+              "symptomRoles": ["errors","kpi","throughput","latency"]
+            }
+          }
+        ],
+        "finishReason": "tool_calls",
+        "usage": {"inputTokens":1449,"outputTokens":234,"cachedInputTokens":0}
+      }
+    },
+    {
+      "call": 2,
+      "request": {
+        "model": "claude-opus-5-5",
+        "system": "You are Heimdall's investigation agent. An engineer reported a problem. Heimdall has located where in the system it most likely lives and planned checks against the system's telemetry. Find out what is broken, where the fault starts and why, using the tools, then call conclude. Heimdall is read-only: you observe, you never change the system.\n\nMethod\n1. Confirm: is it broken, and since when? The onset can narrow the window for the rest.\n2. Localise: run the step checks of each suspect flow. The fault starts at the deepest unhealthy step of a sync flow, and at the first unhealthy stage of an async flow.\n3. Explain and corroborate: run the checks whose condition names the origin step; checks gated on other steps are rarely needed.\n4. Impact: what else is hurt. It is reported, never a cause.\nUse run_checks for planned checks, check_indicator for any other indicator in reach, search_logs, search_traces and get_trace for logs and spans beyond the plan, and describe_vertex, subgraph and impact to read the system's structure.\n\nReading results\n- Every result has an id (r1, r2, ...). Cite these ids when you conclude.\n- verdict is code's verdict for slo, threshold and nonZero expectations (met, breached, no-data). It stands; you cannot override it.\n- For baseline expectations, signal is a preliminary reading from robust statistics (no-data, anomalous, borderline, normal): the peak's z-score and effect against the baseline median, the longest run of deviating points, and the onset. You decide the verdict.\n- no-data is never healthy. When a step without data sits deeper than the deepest unhealthy step of a sync flow, the origin is uncertain.\n- A result with zoom deviated briefly or borderline at its step. Re-run the check over that window before deciding.\n- direction says which way a throughput or KPI moved.\n- Logs and traces results are evidence: cite them, never give them a verdict. They come from samples of the window and of the baseline before it, so counts are of the samples, not totals.\n- A logs result groups lines by template (variable parts as <*>). new templates are absent from the baseline (confirmedAbsent says a baseline query agreed), surging ones grew at least threefold; both carry the first and last example. A component whose stream is new only logs in the window, e.g. a job that started then. correlation lists key values to search the other side of a hop with.\n- A traces result lists the subject's operations that are new, slower (p50 or share of the trace) or failing more than in the baseline, with an exemplar trace. get_trace reads a trace id found in a log example.\n- Only fields the manifest maps reach you, and secrets are replaced by [REDACTED:<kind>]. redaction counts what was dropped or replaced; if evidence you need was dropped, say so rather than guess.\n\nBudget\nEvery turn and every backend query counts. Batch checks into one run_checks call where you can.\n\nConcluding\n- cause-found: the cause vertex and its mechanism, the origin step, the results that show it, and mitigations in three tiers (immediate, short-term, prevention), each with its trade-off.\n- no-signal: nothing in scope is unhealthy.\n- inconclusive: something is wrong, but the evidence does not settle what. Say what is missing.\nGive a verdict (healthy, unhealthy, no-data) for every result you rely on. When the cause is a blind spot, say that the conclusion rests on its callers' view of it.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Report: \"checkouts are not working\" in storefront · prod\nWindow: 2026-10-17T07:58:00.000Z → 2026-10-17T08:00:00.000Z, against 2026-10-17T07:56:00.000Z → 2026-10-17T07:58:00.000Z\nSymptom roles: errors, kpi, throughput, latency (model)\nEntry: functionality:checkout (model)\n\nSystem\nsystem storefront · env prod — Web checkout with stock reservation and card payments\nfunctionality:checkout — Customers pay for their cart and an order is placed | kpi checkout/http_server_request_duration_seconds ~baseline\n  flow:place-order  sync: web/checkout-api POST /api/checkout ▸ checkout/reserve-stock POST /reserve ▸ checkout/orders-db UPDATE orders ▸ checkout/charge POST /charges ▸ payments/provider POST — The browser submits the cart; checkout reserves stock, records the order and charges the card\ncomponent:web  frontend — The storefront in the browser; emits no telemetry of its own → checkout http sync hard\ncomponent:checkout  service → inventory http sync hard · orders-pg sql sync hard · payments http sync hard\ncomponent:payments  service → payment-provider http sync hard\ncomponent:inventory  service → stock-cache redis sync soft\ncomponent:stock-cache  cache redis — Stock levels cached in front of inventory's own database\ncomponent:payment-provider  vendor — External card processor at api.stripe.com; observed only through payments' client metrics\ncomponent:orders-pg  datastore postgresql\ncomponent:orders-reconcile  worker — Periodic batch job reconciling orders against payments → orders-pg sql sync hard\nnot on any flow: dependency:inventory/stock-cache, dependency:orders-reconcile/orders-db\n\n\nScope\nsuspect flows: flow:place-order\nimpact flows: (none)\nin scope: functionality:checkout (entry), flow:place-order (suspect-flow), step:place-order#1 (step), dependency:web/checkout-api (path-dependency), component:web (path-component), component:checkout (path-component), step:place-order#2 (step), dependency:checkout/reserve-stock (path-dependency), component:inventory (path-component), step:place-order#3 (step), dependency:checkout/orders-db (path-dependency), component:orders-pg (path-component), step:place-order#4 (step), dependency:checkout/charge (path-dependency), component:payments (path-component), step:place-order#5 (step), dependency:payments/provider (path-dependency), component:payment-provider (path-component), dependency:inventory/stock-cache (neighbour), component:stock-cache (neighbour), dependency:orders-reconcile/orders-db (contention), component:orders-reconcile (contention)\npruned: (none)\nblind spots: component:web (no-telemetry), component:payment-provider (no-telemetry), component:stock-cache (no-telemetry), component:orders-reconcile (no-indicators)\n\nPlan (31 checks)\nc1 confirm functionality:checkout · kpi checkout/http_server_request_duration_seconds ~baseline · roles kpi — Confirms the symptom and when it started\nc2 confirm flow:place-order · latency checkout/http_server_request_duration_seconds slo p99≤1 · roles latency — End to end place-order: confirms the symptom and when it started\nc3 localise step:place-order#1 · throughput/errors/latency checkout/http_server_request_duration_seconds {POST /api/checkout} ~baseline · roles throughput/errors/latency — Step 1 of place-order: web → checkout over http (POST /api/checkout)\nc4 localise step:place-order#2 · throughput/errors/latency inventory/http_server_request_duration_seconds {POST /reserve} ~baseline · roles throughput/errors/latency — Step 2 of place-order: checkout → inventory over http (POST /reserve)\nc5 localise step:place-order#3 · throughput/latency checkout/db_client_operation_duration_seconds {UPDATE orders} ~baseline · roles throughput/latency — Step 3 of place-order: checkout → orders-pg over sql (UPDATE orders)\nc6 localise step:place-order#4 · throughput/errors/latency payments/http_server_request_duration_seconds {POST /charges} ~baseline · roles throughput/errors/latency — Step 4 of place-order: checkout → payments over http (POST /charges)\nc7 localise step:place-order#5 · throughput/errors/latency payments/http_client_request_duration_seconds {POST} ~baseline · roles throughput/errors/latency — Step 5 of place-order: payments → payment-provider over http (POST)\nc8 explain component:checkout · throughput/errors/latency checkout/http_server_request_duration_seconds ~baseline · roles throughput/errors/latency · if it starts at step:place-order#1 — checkout serves the failing hop\nc9 explain component:checkout · saturation checkout/db_client_connections_usage ~baseline · roles saturation · if it starts at step:place-order#1 or step:place-order#2 or step:place-order#3 or step:place-order#4 — checkout serves the failing hop\nc10 explain component:checkout · saturation checkout/db_client_connections_pending_requests ~baseline · roles saturation · if it starts at step:place-order#1 or step:place-order#2 or step:place-order#3 or step:place-order#4 — checkout serves the failing hop\nc11 explain component:inventory · throughput/errors/latency inventory/http_server_request_duration_seconds ~baseline · roles throughput/errors/latency · if it starts at step:place-order#1 or step:place-order#2 — checkout depends on inventory (hard)\nc12 explain component:orders-pg · saturation orders-pg/pg_stat_activity_max_tx_duration threshold ≤30 · roles saturation · if it starts at step:place-order#1 or step:place-order#3 — checkout depends on orders-pg (hard)\nc13 explain component:orders-pg · saturation orders-pg/pg_stat_activity_count ~baseline · roles saturation · if it starts at step:place-order#1 or step:place-order#3 — checkout depends on orders-pg (hard)\nc14 explain component:orders-pg · saturation orders-pg/pg_locks_count ~baseline · roles saturation · if it starts at step:place-order#1 or step:place-order#3 — checkout depends on orders-pg (hard)\nc15 explain component:payments · throughput/errors/latency payments/http_server_request_duration_seconds ~baseline · roles throughput/errors/latency · if it starts at step:place-order#1 or step:place-order#4 — checkout depends on payments (hard)\nc16 corroborate component:checkout · logs {POST /api/checkout} · target of dependency:web/checkout-api · if it starts at step:place-order#1 — Logs of checkout around the hop\nc17 corroborate component:checkout · traces {POST /api/checkout} · target of dependency:web/checkout-api · if it starts at step:place-order#1 — Spans of checkout for the hop\nc18 corroborate component:checkout · logs {POST /reserve} · caller of dependency:checkout/reserve-stock · if it starts at step:place-order#2 — Logs of checkout around the hop\nc19 corroborate component:inventory · logs {POST /reserve} · target of dependency:checkout/reserve-stock · if it starts at step:place-order#2 — Logs of inventory around the hop\nc20 corroborate component:checkout · traces {POST /reserve} · caller of dependency:checkout/reserve-stock · if it starts at step:place-order#2 — Spans of checkout for the hop\nc21 corroborate component:inventory · traces {POST /reserve} · target of dependency:checkout/reserve-stock · if it starts at step:place-order#2 — Spans of inventory for the hop\nc22 corroborate component:orders-reconcile · logs · caller of dependency:orders-reconcile/orders-db · if it starts at step:place-order#3 — Logs of orders-reconcile: orders-reconcile also uses orders-pg\nc23 corroborate component:checkout · logs {UPDATE orders} · caller of dependency:checkout/orders-db · if it starts at step:place-order#3 — Logs of checkout around the hop\nc24 corroborate component:orders-pg · logs {UPDATE orders} · target of dependency:checkout/orders-db · if it starts at step:place-order#3 — Logs of orders-pg around the hop\nc25 corroborate component:checkout · traces {UPDATE orders} · caller of dependency:checkout/orders-db · if it starts at step:place-order#3 — Spans of checkout for the hop\nc26 corroborate component:checkout · logs {POST /charges} · caller of dependency:checkout/charge · if it starts at step:place-order#4 — Logs of checkout around the hop\nc27 corroborate component:payments · logs {POST /charges} · target of dependency:checkout/charge · if it starts at step:place-order#4 — Logs of payments around the hop\nc28 corroborate component:checkout · traces {POST /charges} · caller of dependency:checkout/charge · if it starts at step:place-order#4 — Spans of checkout for the hop\nc29 corroborate component:payments · traces {POST /charges} · target of dependency:checkout/charge · if it starts at step:place-order#4 — Spans of payments for the hop\nc30 corroborate component:payments · logs {POST} · caller of dependency:payments/provider · if it starts at step:place-order#5 — Logs of payments around the hop\nc31 corroborate component:payments · traces {POST} · caller of dependency:payments/provider · if it starts at step:place-order#5 — Spans of payments for the hop"
+          }
+        ],
+        "tools": [
+          {
+            "name": "check_indicator",
+            "description": "Run any indicator by id (indicator:<subject>@<n>, see describe_vertex), planned or not, over every role it serves. Its subject must be in scope; for a pruned subject, say why in reason.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "indicator": {"type":"string","description":"An indicator id"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned subject"}
+              },
+              "required": ["indicator"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "conclude",
+            "description": "End the investigation. Give a verdict for every result you rely on, cite result ids as evidence, and for a cause propose mitigations in three tiers with their trade-offs. Code checks the conclusion against the results; a rejected one comes back once to be fixed.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "outcome": {"type":"string","enum":["cause-found","no-signal","inconclusive"]},
+                "summary": {"type":"string","description":"Two or three sentences for the engineer"},
+                "cause": {
+                  "type": "object",
+                  "properties": {
+                    "vertex": {
+                      "type": "string",
+                      "description": "The vertex at fault, e.g. component:payment-provider"
+                    },
+                    "mechanism": {"type":"string","description":"What happened there, in one sentence"}
+                  },
+                  "required": ["vertex","mechanism"],
+                  "additionalProperties": false
+                },
+                "origin": {
+                  "type": "object",
+                  "description": "The step the fault starts at, by the origin rule",
+                  "properties": {
+                    "step": {"type":"string"},
+                    "uncertain": {
+                      "type": "boolean",
+                      "description": "True when a step without data could be the origin"
+                    }
+                  },
+                  "required": ["step","uncertain"],
+                  "additionalProperties": false
+                },
+                "verdicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "result": {"type":"string","description":"A result id, e.g. r3"},
+                      "verdict": {"type":"string","enum":["healthy","unhealthy","no-data"]},
+                      "reason": {"type":"string"}
+                    },
+                    "required": ["result","verdict","reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "description": "Result ids the conclusion rests on"
+                },
+                "confidence": {"type":"number"},
+                "mitigations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tier": {"type":"string","enum":["immediate","short-term","prevention"]},
+                      "action": {"type":"string"},
+                      "tradeoff": {"type":"string"}
+                    },
+                    "required": ["tier","action","tradeoff"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["outcome","summary","verdicts","evidence","confidence","mitigations"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "describe_vertex",
+            "description": "Describe one vertex: its properties, its indicators (with ids for check_indicator), its edges, and whether it is in scope.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "get_trace",
+            "description": "Read one trace by id, e.g. a traceId field of a log example, as a redacted span tree: services, operations, durations, statuses and allowlisted attributes.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {"traceId":{"type":"string","description":"A hex trace id"}},
+              "required": ["traceId"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "impact",
+            "description": "What depends on a vertex, up to the flows and functionalities it can break.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                }
+              },
+              "required": ["vertex"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "run_checks",
+            "description": "Run planned checks by id (c1, c2, …). An indicator check returns, per role, deviation statistics against the baseline and, for SLO, threshold and nonZero expectations, code's verdict. A logs check returns log templates that are new or surging against the baseline, with redacted examples; a traces check returns the subject's span operations that got slower, are new or fail, with an exemplar trace. Pass a narrower window to zoom in, e.g. from an onset.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {"type":"string"},
+                  "minItems": 1,
+                  "description": "Planned check ids, at most 10 per call"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["checks"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_logs",
+            "description": "Read a component's logs, planned or not: templates that are new, surging or vanished against the baseline, with redacted examples. contains narrows to lines holding a literal text, e.g. a correlation value from another result. Only fields the manifest maps are returned.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "contains": {
+                  "type": "string",
+                  "description": "Optional literal text a line must contain (no regex), at most 100 characters"
+                },
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "search_traces",
+            "description": "Read a component's spans, planned or not: its operations (span names) that got slower, are new or fail against the baseline, with an exemplar trace. operation narrows to one span name; errorsOnly reads failed spans only.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "component": {"type":"string","description":"A component id, e.g. component:orders-pg"},
+                "operation": {"type":"string","description":"Optional exact span name"},
+                "errorsOnly": {"type":"boolean","description":"Only spans with an error status"},
+                "window": {
+                  "type": "object",
+                  "description": "Optional narrower window, e.g. the zoom a result suggests. ISO-8601; within the investigation window or its baseline.",
+                  "properties": {
+                    "start": {"type":"string","format":"date-time"},
+                    "end": {"type":"string","format":"date-time"}
+                  },
+                  "required": ["start","end"],
+                  "additionalProperties": false
+                },
+                "reason": {"type":"string","description":"Why look at a pruned component"}
+              },
+              "required": ["component"],
+              "additionalProperties": false
+            },
+            "strict": true
+          },
+          {
+            "name": "subgraph",
+            "description": "The vertices and edges within 1 or 2 hops of a vertex, indicators left out.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "vertex": {
+                  "type": "string",
+                  "description": "A vertex id, e.g. component:checkout or step:place-order#3"
+                },
+                "hops": {"type":"integer","enum":[1,2]}
+              },
+              "required": ["vertex","hops"],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        ],
+        "toolChoice": {"type":"auto"},
+        "maxTokens": 16000,
+        "reasoning": {"effort":"high"},
+        "fallbackOnRefusal": true,
+        "providerOptions": {"systemCacheControl":{"type":"ephemeral"}}
+      },
+      "response": {
+        "id": "msg_011CgaqcLR68tfpEbKJK3oFF",
+        "model": "claude-opus-5-5",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "",
+            "signature": "CAQSjgUKEAgTGAI4AUIIdGhpbmtpbmcSDLtxw+tgXQd6GihDNhoMXLLsu66nGaXHd14qIjAHw1+sjPnnMmE+CAt4X3sZU457Fx/S/5VV9z4akbAlqM3vvp3PKYov22zbDkn2jmAqqwTC39vN9oS5gpSn9HB2v3rjlnzH4muPyDifQ5vlm15vpc6ghVYuu+yLcOv1cw5chOWj0OqMK+w3fFCuGJlj/q0Osl+wKuDi2QFLkb2cgHtzEqIhmQnbrpWZRz2E9AHkOWId/p00ArJUUYThGdfWahEJlkMRDkjl4Lv9ypCtfsBcVWw/W8fa2ZhC0HFFFF+fWRNoXLhwk9ummM86rjg9AYXKPkqMGH/DncjDsCkghUCdrSuWRKd6FUBGzF+yXjGoohpr9OcTw1yICh2+1Bj9r8SnNei2So96iAfdJaXpcJ2eTBB+VBs5wbEc96nH+CDxX3uv6i3/795fB2gsqjq3dpU4/ysMNM0b5jDqP6TBHHd0NDydYM2pSNNkhIS0l7JX0Ikw4tHYVCeCGCiiTkT/buKZr7rgfGqgEKXFVver3MtFegkFMWDt+/+34FvOJBHCatJ9C59eO5Qt5tgDNwHs5/dP6oa1mgTvQHjD8LJHuYvpnQqs6Qbl7DzjTxnuniaQfhG+lRT+PiPzbvwQIuW0CWV8Jp20Jun5fE5/g47pev3lRq2/iRZXuso+UPpvFchWfoPCZnqzhqxElLf7a00Kq5mPRHC4+JDak6UDJh2DGaAvk0OIbBp2Al65F9gIxuep/Nk0VhTZ5oUzUlBgRmTQOaZp1V5UY+yFI+kBm1SIYQhu3hBH4MAsMXfsNyPIXvZWbUU7szGmawGCHFf918dz+yQP62XiRKAzB9QIR8UYAQ=="
+          },
+          {
+            "type": "tool_call",
+            "id": "toolu_01U9jfW8bZ7WJhkMQNX6DnD5",
+            "name": "run_checks",
+            "input": {"checks":["c1","c2","c3","c4","c5","c6","c7"]}
+          }
+        ],
+        "finishReason": "tool_calls",
+        "usage": {"inputTokens":3411,"outputTokens":90,"cachedInputTokens":0}
+      }
+    }
+  ],
+  "telemetry": [
+    {
+      "operation": "logs.queryRange",
+      "source": "http://loki.fixture.invalid",
+      "request": {
+        "query": "{service_name=\"payments\"} |~ `retry\\s+budget\\s+exhausted`",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T07:59:00.000Z",
+        "limit": 1,
+        "fields": {"level":"severity","msg":"message","trace_id":"traceId","payment_id":"paymentId"},
+        "component": "payments"
+      },
+      "result": {
+        "records": [],
+        "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
+      }
+    },
+    {
+      "operation": "metrics.queryRange",
+      "source": "http://prometheus.fixture.invalid",
+      "request": {
+        "query": "sum(rate(http_client_request_duration_seconds_count{service=\"payments\",http_request_method=\"POST\"}[60s]))",
+        "start": "2026-10-17T07:56:00.000Z",
+        "end": "2026-10-17T07:58:00.000Z",
+        "stepSeconds": 1,
+        "labels": ["http_request_method","http_response_status_code","service"]
+      },
+      "result": []
+    },
+    {
+      "operation": "traces.search",
+      "source": "http://tempo.fixture.invalid",
+      "request": {
+        "query": "{ resource.service.name = \"payments\" && kind = client && span.http.request.method = \"POST\" && status = error }",
+        "start": "2026-10-17T07:58:00.000Z",
+        "end": "2026-10-17T07:59:00.000Z",
+        "limit": 10,
+        "spansPerSpanSet": 25,
+        "component": "payments"
+      },
+      "result": {
+        "traces": [
+          {
+            "traceId": "46f223baaeca124f8bfda9849ed74411",
+            "rootServiceName": "checkout",
+            "rootName": "POST /api/checkout",
+            "startMs": 1792223940841,
+            "durationMs": 62,
+            "matched": 1,
+            "spans": [
+              {
+                "spanId": "622689616af6a4be",
+                "name": "POST /v1/payment_intents",
+                "startMs": 1792223940856,
+                "durationMs": 27,
+                "attributes": {
+                  "service.name": "payments",
+                  "http.request.method": "POST",
+                  "server.address": "api.stripe.com",
+                  "http.response.status_code": 502,
+                  "error.type": "502"
+                }
+              }
+            ]
+          }
+        ],
+        "redaction": {"records":1,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
+      }
+    },
+    {
+      "operation": "traces.trace",
+      "source": "http://tempo.fixture.invalid",
+      "request": {"traceId":"b5c5c42d2a9491b46986777b0510dca2","component":"payments"},
+      "result": {
+        "trace": {
+          "traceId": "b5c5c42d2a9491b46986777b0510dca2",
+          "spans": [
+            {
+              "spanId": "2d9550cf8971cf44",
+              "service": "payments",
+              "name": "POST /charges",
+              "kind": "server",
+              "startMs": 1792223975475,
+              "durationMs": 405.662542,
+              "status": {"code":"error"},
+              "attributes": {"http.request.method":"POST","http.route":"/charges","http.response.status_code":502},
+              "exceptions": []
+            },
+            {
+              "spanId": "f6ff26ec7d045d53",
+              "parentSpanId": "2d9550cf8971cf44",
+              "service": "payments",
+              "name": "POST /v1/payment_intents",
+              "kind": "client",
+              "startMs": 1792223975476,
+              "durationMs": 327.438827,
+              "status": {"code":"error","message":"502 Bad Gateway from api.stripe.com"},
+              "attributes": {
+                "http.request.method": "POST",
+                "server.address": "api.stripe.com",
+                "http.response.status_code": 502,
+                "error.type": "502"
+              },
+              "exceptions": [{"message":"502 Bad Gateway from api.stripe.com"}]
+            }
+          ]
+        },
+        "redaction": {"records":2,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
+      }
+    }
+  ],
+  "outcome": {
+    "events": [
+      {
+        "type": "investigation.started",
+        "query": "checkouts are not working",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-17T07:58:00.000Z",
+          "end": "2026-10-17T08:00:00.000Z",
+          "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+        }
+      },
+      {
+        "type": "investigation.symptom_classified",
+        "symptom": {"roles":["errors","kpi","throughput","latency"],"method":"model"}
+      },
+      {
+        "type": "investigation.entry_located",
+        "entry": {
+          "vertex": "functionality:checkout",
+          "type": "functionality",
+          "method": "model",
+          "confidence": 0.6,
+          "reason": "Report is vague user-facing: customers cannot complete checkout.",
+          "candidates": [
+            {
+              "vertex": "functionality:checkout",
+              "confidence": 0.6,
+              "reason": "Report is vague user-facing: customers cannot complete checkout."
+            },
+            {
+              "vertex": "flow:place-order",
+              "confidence": 0.45,
+              "reason": "The checkout submission path is the concrete flow that would be failing."
+            },
+            {
+              "vertex": "component:checkout",
+              "confidence": 0.2,
+              "reason": "The checkout service itself may be the failing component."
+            }
+          ]
+        }
+      },
+      {
+        "type": "investigation.scope_resolved",
+        "scope": {
+          "suspectFlows": ["flow:place-order"],
+          "impactFlows": [],
+          "vertices": [
+            {"vertex":"functionality:checkout","reason":"entry"},
+            {"vertex":"flow:place-order","reason":"suspect-flow"},
+            {"vertex":"step:place-order#1","reason":"step"},
+            {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+            {"vertex":"component:web","reason":"path-component"},
+            {"vertex":"component:checkout","reason":"path-component"},
+            {"vertex":"step:place-order#2","reason":"step"},
+            {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+            {"vertex":"component:inventory","reason":"path-component"},
+            {"vertex":"step:place-order#3","reason":"step"},
+            {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+            {"vertex":"component:orders-pg","reason":"path-component"},
+            {"vertex":"step:place-order#4","reason":"step"},
+            {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+            {"vertex":"component:payments","reason":"path-component"},
+            {"vertex":"step:place-order#5","reason":"step"},
+            {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+            {"vertex":"component:payment-provider","reason":"path-component"},
+            {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+            {"vertex":"component:stock-cache","reason":"neighbour"},
+            {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+            {"vertex":"component:orders-reconcile","reason":"contention"}
+          ],
+          "pruned": []
+        }
+      },
+      {
+        "type": "investigation.plan_ready",
+        "plan": {
+          "query": "checkouts are not working",
+          "system": "storefront",
+          "environment": {"name":"prod","context":"prod"},
+          "window": {
+            "start": "2026-10-17T07:58:00.000Z",
+            "end": "2026-10-17T08:00:00.000Z",
+            "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+          },
+          "symptom": {"roles":["errors","kpi","throughput","latency"],"method":"model"},
+          "entry": {
+            "vertex": "functionality:checkout",
+            "type": "functionality",
+            "method": "model",
+            "confidence": 0.6,
+            "reason": "Report is vague user-facing: customers cannot complete checkout.",
+            "candidates": [
+              {
+                "vertex": "functionality:checkout",
+                "confidence": 0.6,
+                "reason": "Report is vague user-facing: customers cannot complete checkout."
+              },
+              {
+                "vertex": "flow:place-order",
+                "confidence": 0.45,
+                "reason": "The checkout submission path is the concrete flow that would be failing."
+              },
+              {
+                "vertex": "component:checkout",
+                "confidence": 0.2,
+                "reason": "The checkout service itself may be the failing component."
+              }
+            ]
+          },
+          "scope": {
+            "suspectFlows": ["flow:place-order"],
+            "impactFlows": [],
+            "vertices": [
+              {"vertex":"functionality:checkout","reason":"entry"},
+              {"vertex":"flow:place-order","reason":"suspect-flow"},
+              {"vertex":"step:place-order#1","reason":"step"},
+              {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+              {"vertex":"component:web","reason":"path-component"},
+              {"vertex":"component:checkout","reason":"path-component"},
+              {"vertex":"step:place-order#2","reason":"step"},
+              {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+              {"vertex":"component:inventory","reason":"path-component"},
+              {"vertex":"step:place-order#3","reason":"step"},
+              {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+              {"vertex":"component:orders-pg","reason":"path-component"},
+              {"vertex":"step:place-order#4","reason":"step"},
+              {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+              {"vertex":"component:payments","reason":"path-component"},
+              {"vertex":"step:place-order#5","reason":"step"},
+              {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+              {"vertex":"component:payment-provider","reason":"path-component"},
+              {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+              {"vertex":"component:stock-cache","reason":"neighbour"},
+              {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+              {"vertex":"component:orders-reconcile","reason":"contention"}
+            ],
+            "pruned": []
+          },
+          "checks": [
+            {
+              "id": "c1",
+              "tier": "confirm",
+              "kind": "indicator",
+              "subject": "functionality:checkout",
+              "indicator": {
+                "id": "indicator:functionality:checkout@1",
+                "type": "indicator",
+                "subject": "functionality:checkout",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["kpi"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "declared",
+                "description": "Checkout requests served"
+              },
+              "roles": ["kpi"],
+              "rationale": "Confirms the symptom and when it started"
+            },
+            {
+              "id": "c2",
+              "tier": "confirm",
+              "kind": "indicator",
+              "subject": "flow:place-order",
+              "indicator": {
+                "id": "indicator:flow:place-order@1",
+                "type": "indicator",
+                "subject": "flow:place-order",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["latency"],
+                "expect": {"kind":"slo","p99":1},
+                "selector": {},
+                "provenance": "declared"
+              },
+              "roles": ["latency"],
+              "rationale": "End to end place-order: confirms the symptom and when it started"
+            },
+            {
+              "id": "c3",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#1",
+              "indicator": {
+                "id": "indicator:step:place-order#1@1",
+                "type": "indicator",
+                "subject": "step:place-order#1",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/api/checkout","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 1 of place-order: web → checkout over http (POST /api/checkout)"
+            },
+            {
+              "id": "c4",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#2",
+              "indicator": {
+                "id": "indicator:step:place-order#2@1",
+                "type": "indicator",
+                "subject": "step:place-order#2",
+                "metric": "inventory/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/reserve","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 2 of place-order: checkout → inventory over http (POST /reserve)"
+            },
+            {
+              "id": "c5",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#3",
+              "indicator": {
+                "id": "indicator:step:place-order#3@1",
+                "type": "indicator",
+                "subject": "step:place-order#3",
+                "metric": "checkout/db_client_operation_duration_seconds",
+                "roles": ["throughput","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"operation":"UPDATE","table":"orders"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","latency"],
+              "rationale": "Step 3 of place-order: checkout → orders-pg over sql (UPDATE orders)"
+            },
+            {
+              "id": "c6",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#4",
+              "indicator": {
+                "id": "indicator:step:place-order#4@1",
+                "type": "indicator",
+                "subject": "step:place-order#4",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"route":"/charges","method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 4 of place-order: checkout → payments over http (POST /charges)"
+            },
+            {
+              "id": "c7",
+              "tier": "localise",
+              "kind": "indicator",
+              "subject": "step:place-order#5",
+              "indicator": {
+                "id": "indicator:step:place-order#5@1",
+                "type": "indicator",
+                "subject": "step:place-order#5",
+                "metric": "payments/http_client_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {"method":"POST"},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "rationale": "Step 5 of place-order: payments → payment-provider over http (POST)"
+            },
+            {
+              "id": "c8",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@1",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c9",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@2",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_usage",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {
+                "failingSteps": [
+                  "step:place-order#1",
+                  "step:place-order#2",
+                  "step:place-order#3",
+                  "step:place-order#4"
+                ]
+              },
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c10",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:checkout",
+              "indicator": {
+                "id": "indicator:component:checkout@3",
+                "type": "indicator",
+                "subject": "component:checkout",
+                "metric": "checkout/db_client_connections_pending_requests",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {
+                "failingSteps": [
+                  "step:place-order#1",
+                  "step:place-order#2",
+                  "step:place-order#3",
+                  "step:place-order#4"
+                ]
+              },
+              "rationale": "checkout serves the failing hop"
+            },
+            {
+              "id": "c11",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:inventory",
+              "indicator": {
+                "id": "indicator:component:inventory@1",
+                "type": "indicator",
+                "subject": "component:inventory",
+                "metric": "inventory/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#2"]},
+              "rationale": "checkout depends on inventory (hard)"
+            },
+            {
+              "id": "c12",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@1",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_stat_activity_max_tx_duration",
+                "roles": ["saturation"],
+                "expect": {"kind":"threshold","max":30},
+                "selector": {},
+                "provenance": "declared"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c13",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@2",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_stat_activity_count",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c14",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:orders-pg",
+              "indicator": {
+                "id": "indicator:component:orders-pg@3",
+                "type": "indicator",
+                "subject": "component:orders-pg",
+                "metric": "orders-pg/pg_locks_count",
+                "roles": ["saturation"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["saturation"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+              "rationale": "checkout depends on orders-pg (hard)"
+            },
+            {
+              "id": "c15",
+              "tier": "explain",
+              "kind": "indicator",
+              "subject": "component:payments",
+              "indicator": {
+                "id": "indicator:component:payments@1",
+                "type": "indicator",
+                "subject": "component:payments",
+                "metric": "payments/http_server_request_duration_seconds",
+                "roles": ["throughput","errors","latency"],
+                "expect": {"kind":"baseline"},
+                "selector": {},
+                "provenance": "derived"
+              },
+              "roles": ["throughput","errors","latency"],
+              "when": {"failingSteps":["step:place-order#1","step:place-order#4"]},
+              "rationale": "checkout depends on payments (hard)"
+            },
+            {
+              "id": "c16",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/api/checkout","method":"POST"},
+              "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c17",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/api/checkout","method":"POST"},
+              "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+              "when": {"failingSteps":["step:place-order#1"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c18",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c19",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:inventory",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Logs of inventory around the hop"
+            },
+            {
+              "id": "c20",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c21",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:inventory",
+              "roles": [],
+              "match": {"route":"/reserve","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+              "when": {"failingSteps":["step:place-order#2"]},
+              "rationale": "Spans of inventory for the hop"
+            },
+            {
+              "id": "c22",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:orders-reconcile",
+              "roles": [],
+              "hop": {"dependency":"dependency:orders-reconcile/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of orders-reconcile: orders-reconcile also uses orders-pg"
+            },
+            {
+              "id": "c23",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c24",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:orders-pg",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"target"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Logs of orders-pg around the hop"
+            },
+            {
+              "id": "c25",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"operation":"UPDATE","table":"orders"},
+              "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+              "when": {"failingSteps":["step:place-order#3"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c26",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Logs of checkout around the hop"
+            },
+            {
+              "id": "c27",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Logs of payments around the hop"
+            },
+            {
+              "id": "c28",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:checkout",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Spans of checkout for the hop"
+            },
+            {
+              "id": "c29",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"route":"/charges","method":"POST"},
+              "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+              "when": {"failingSteps":["step:place-order#4"]},
+              "rationale": "Spans of payments for the hop"
+            },
+            {
+              "id": "c30",
+              "tier": "corroborate",
+              "kind": "logs",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"method":"POST"},
+              "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+              "when": {"failingSteps":["step:place-order#5"]},
+              "rationale": "Logs of payments around the hop"
+            },
+            {
+              "id": "c31",
+              "tier": "corroborate",
+              "kind": "traces",
+              "subject": "component:payments",
+              "roles": [],
+              "match": {"method":"POST"},
+              "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+              "when": {"failingSteps":["step:place-order#5"]},
+              "rationale": "Spans of payments for the hop"
+            }
+          ],
+          "blindSpots": [
+            {"vertex":"component:web","reason":"no-telemetry"},
+            {"vertex":"component:payment-provider","reason":"no-telemetry"},
+            {"vertex":"component:stock-cache","reason":"no-telemetry"},
+            {"vertex":"component:orders-reconcile","reason":"no-indicators"}
+          ],
+          "omittedChecks": 0
+        }
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 1,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 3411,
+        "outputTokens": 90
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r1",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:functionality:checkout@1",
+          "subject": "functionality:checkout",
+          "role": "kpi",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "down",
+          "unit": "per second",
+          "baseline": {"median":118.2,"spread":4.071},
+          "peak": {"value":94.66,"at":"2026-10-17T07:59:36.000Z","z":5.778,"effectPercent":-19.9},
+          "longestRun": 4,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r2",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:flow:place-order@1",
+          "subject": "flow:place-order",
+          "role": "latency",
+          "expectation": "slo",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": "met",
+          "bounds": "p99 ≤ 1",
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r3",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":118.2,"spread":4.037},
+          "peak": {"value":126.9,"at":"2026-10-17T07:59:47.000Z","z":2.151,"effectPercent":7.348},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r4",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.001169,"spread":0.0002963},
+          "peak": {"value":0.1901,"at":"2026-10-17T07:59:36.000Z","z":637.7,"effectPercent":16170},
+          "longestRun": 25,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r5",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r6",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "down",
+          "unit": "per second",
+          "baseline": {"median":139.9,"spread":4.172},
+          "peak": {"value":127.5,"at":"2026-10-17T07:59:35.000Z","z":2.975,"effectPercent":-8.872},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r7",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0003952,"spread":0.0001012},
+          "peak": {"value":0.0006717,"at":"2026-10-17T07:59:33.000Z","z":2.733,"effectPercent":69.96},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r8",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.09046,"spread":0.00787},
+          "peak": {"value":0.1066,"at":"2026-10-17T07:58:31.000Z","z":2.047,"effectPercent":17.81},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r9",
+          "kind": "indicator",
+          "check": "c5",
+          "indicator": "indicator:step:place-order#3@1",
+          "subject": "step:place-order#3",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r10",
+          "kind": "indicator",
+          "check": "c5",
+          "indicator": "indicator:step:place-order#3@1",
+          "subject": "step:place-order#3",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r11",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.03,"spread":1.795},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.681,"effectPercent":9.25},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r12",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0008328,"spread":0.0001735},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2590,"effectPercent":53950},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r13",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2091,"spread":0.01442},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":22.57,"effectPercent":155.6},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r14",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r15",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0005,"spread":0.000005},
+          "peak": {"value":0.62,"at":"2026-10-17T07:59:35.000Z","z":123900,"effectPercent":123900},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r16",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 2,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 7767,
+        "outputTokens": 260
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 3,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 8080,
+        "outputTokens": 121
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r17",
+          "kind": "logs",
+          "check": "c30",
+          "subject": "component:payments",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z"},
+          "baseline": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T07:59:00.000Z"},
+          "filter": {"contains":null,"narrowedBy":{},"ignored":["method"]},
+          "sampled": {"window":445,"baseline":385,"slices":4,"capped":false},
+          "streamNew": false,
+          "templates": {
+            "new": [
+              {
+                "id": "7d4ae092",
+                "template": "provider request failed",
+                "count": {"window":68,"baseline":0},
+                "severity": "error",
+                "share": 0.153,
+                "firstSeen": "2026-10-17T07:59:35.251Z",
+                "lastSeen": "2026-10-17T07:59:57.642Z",
+                "confirmedAbsent": true,
+                "examples": [
+                  {
+                    "at": "2026-10-17T07:59:35.251Z",
+                    "fields": {
+                      "severity": "error",
+                      "message": "provider request failed",
+                      "paymentId": "pay_fdb046c3376b65c6a39b5a34",
+                      "traceId": "305a7f62870b9e26078f26f0e66e47ca"
+                    }
+                  },
+                  {
+                    "at": "2026-10-17T07:59:57.642Z",
+                    "fields": {
+                      "severity": "error",
+                      "message": "provider request failed",
+                      "paymentId": "pay_14b9494f33555ec41b93e83c",
+                      "traceId": "60bc1b17c32a4870348244bbef72beed"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "4ed28c77",
+                "template": "retry budget exhausted",
+                "count": {"window":14,"baseline":0},
+                "severity": "error",
+                "share": 0.0315,
+                "firstSeen": "2026-10-17T07:59:35.282Z",
+                "lastSeen": "2026-10-17T07:59:49.224Z",
+                "confirmedAbsent": true,
+                "examples": [
+                  {
+                    "at": "2026-10-17T07:59:35.282Z",
+                    "fields": {"severity":"error","message":"retry budget exhausted"}
+                  },
+                  {
+                    "at": "2026-10-17T07:59:49.224Z",
+                    "fields": {"severity":"error","message":"retry budget exhausted"}
+                  }
+                ]
+              }
+            ],
+            "surging": [],
+            "steady": [
+              {
+                "id": "e611a27c",
+                "template": "charge authorized",
+                "count": {"window":359,"baseline":378},
+                "severity": "info"
+              },
+              {
+                "id": "b17fcbc3",
+                "template": "provider latency high",
+                "count": {"window":4,"baseline":7},
+                "severity": "warn"
+              }
+            ],
+            "vanished": []
+          },
+          "correlation": null,
+          "redaction": {"records":830,"fieldsDropped":2615,"truncated":0,"matches":{}},
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r18",
+          "kind": "traces",
+          "check": "c31",
+          "subject": "component:payments",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z"},
+          "baseline": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T07:59:00.000Z"},
+          "filter": {
+            "side": "caller",
+            "operation": null,
+            "errorsOnly": false,
+            "narrowedBy": {"method":"POST"},
+            "ignored": []
+          },
+          "sampled": {"window":20,"baseline":20,"errorTraces":{"window":10,"baseline":1},"errorLimit":10},
+          "operations": [
+            {
+              "name": "POST /v1/payment_intents",
+              "changes": ["errors"],
+              "spans": {"window":20,"baseline":20},
+              "durationMs": {"p50":{"window":65,"baseline":61},"p95":{"window":160,"baseline":159}},
+              "shareOfRoot": {"window":0.5123,"baseline":0.4857},
+              "errorTraces": {"window":10,"baseline":1},
+              "errorTypes": ["502"]
+            }
+          ],
+          "exemplar": {
+            "traceId": "b5c5c42d2a9491b46986777b0510dca2",
+            "durationMs": 405.662542,
+            "spans": [
+              {
+                "depth": 0,
+                "service": "payments",
+                "name": "POST /charges",
+                "kind": "server",
+                "durationMs": 405.662542,
+                "status": "error",
+                "message": null,
+                "attributes": {
+                  "http.request.method": "POST",
+                  "http.route": "/charges",
+                  "http.response.status_code": 502
+                },
+                "exceptions": []
+              },
+              {
+                "depth": 1,
+                "service": "payments",
+                "name": "POST /v1/payment_intents",
+                "kind": "client",
+                "durationMs": 327.438827,
+                "status": "error",
+                "message": "502 Bad Gateway from api.stripe.com",
+                "attributes": {
+                  "http.request.method": "POST",
+                  "server.address": "api.stripe.com",
+                  "http.response.status_code": 502,
+                  "error.type": "502"
+                },
+                "exceptions": [{"type":null,"message":"502 Bad Gateway from api.stripe.com"}]
+              }
+            ],
+            "omittedSpans": 0
+          },
+          "redaction": {"records":53,"fieldsDropped":0,"truncated":0,"matches":{}},
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r19",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.32,"spread":1.599},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.831,"effectPercent":8.651},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r20",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.00081,"spread":0.0002052},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2190,"effectPercent":55470},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.check_completed",
+        "result": {
+          "result": "r21",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2131,"spread":0.01551},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":20.73,"effectPercent":150.8},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 4,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 10660,
+        "outputTokens": 1871
+      },
+      {
+        "type": "investigation.agent_turn",
+        "turn": 5,
+        "finishReason": "tool_calls",
+        "toolCalls": 1,
+        "inputTokens": 12590,
+        "outputTokens": 1782
+      }
+    ],
+    "report": {
+      "plan": {
+        "query": "checkouts are not working",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-17T07:58:00.000Z",
+          "end": "2026-10-17T08:00:00.000Z",
+          "baseline": {"start":"2026-10-17T07:56:00.000Z","end":"2026-10-17T07:58:00.000Z"}
+        },
+        "symptom": {"roles":["errors","kpi","throughput","latency"],"method":"model"},
+        "entry": {
+          "vertex": "functionality:checkout",
+          "type": "functionality",
+          "method": "model",
+          "confidence": 0.6,
+          "reason": "Report is vague user-facing: customers cannot complete checkout.",
+          "candidates": [
+            {
+              "vertex": "functionality:checkout",
+              "confidence": 0.6,
+              "reason": "Report is vague user-facing: customers cannot complete checkout."
+            },
+            {
+              "vertex": "flow:place-order",
+              "confidence": 0.45,
+              "reason": "The checkout submission path is the concrete flow that would be failing."
+            },
+            {
+              "vertex": "component:checkout",
+              "confidence": 0.2,
+              "reason": "The checkout service itself may be the failing component."
+            }
+          ]
+        },
+        "scope": {
+          "suspectFlows": ["flow:place-order"],
+          "impactFlows": [],
+          "vertices": [
+            {"vertex":"functionality:checkout","reason":"entry"},
+            {"vertex":"flow:place-order","reason":"suspect-flow"},
+            {"vertex":"step:place-order#1","reason":"step"},
+            {"vertex":"dependency:web/checkout-api","reason":"path-dependency"},
+            {"vertex":"component:web","reason":"path-component"},
+            {"vertex":"component:checkout","reason":"path-component"},
+            {"vertex":"step:place-order#2","reason":"step"},
+            {"vertex":"dependency:checkout/reserve-stock","reason":"path-dependency"},
+            {"vertex":"component:inventory","reason":"path-component"},
+            {"vertex":"step:place-order#3","reason":"step"},
+            {"vertex":"dependency:checkout/orders-db","reason":"path-dependency"},
+            {"vertex":"component:orders-pg","reason":"path-component"},
+            {"vertex":"step:place-order#4","reason":"step"},
+            {"vertex":"dependency:checkout/charge","reason":"path-dependency"},
+            {"vertex":"component:payments","reason":"path-component"},
+            {"vertex":"step:place-order#5","reason":"step"},
+            {"vertex":"dependency:payments/provider","reason":"path-dependency"},
+            {"vertex":"component:payment-provider","reason":"path-component"},
+            {"vertex":"dependency:inventory/stock-cache","reason":"neighbour"},
+            {"vertex":"component:stock-cache","reason":"neighbour"},
+            {"vertex":"dependency:orders-reconcile/orders-db","reason":"contention"},
+            {"vertex":"component:orders-reconcile","reason":"contention"}
+          ],
+          "pruned": []
+        },
+        "checks": [
+          {
+            "id": "c1",
+            "tier": "confirm",
+            "kind": "indicator",
+            "subject": "functionality:checkout",
+            "indicator": {
+              "id": "indicator:functionality:checkout@1",
+              "type": "indicator",
+              "subject": "functionality:checkout",
+              "metric": "checkout/http_server_request_duration_seconds",
+              "roles": ["kpi"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "declared",
+              "description": "Checkout requests served"
+            },
+            "roles": ["kpi"],
+            "rationale": "Confirms the symptom and when it started"
+          },
+          {
+            "id": "c2",
+            "tier": "confirm",
+            "kind": "indicator",
+            "subject": "flow:place-order",
+            "indicator": {
+              "id": "indicator:flow:place-order@1",
+              "type": "indicator",
+              "subject": "flow:place-order",
+              "metric": "checkout/http_server_request_duration_seconds",
+              "roles": ["latency"],
+              "expect": {"kind":"slo","p99":1},
+              "selector": {},
+              "provenance": "declared"
+            },
+            "roles": ["latency"],
+            "rationale": "End to end place-order: confirms the symptom and when it started"
+          },
+          {
+            "id": "c3",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#1",
+            "indicator": {
+              "id": "indicator:step:place-order#1@1",
+              "type": "indicator",
+              "subject": "step:place-order#1",
+              "metric": "checkout/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"route":"/api/checkout","method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "Step 1 of place-order: web → checkout over http (POST /api/checkout)"
+          },
+          {
+            "id": "c4",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#2",
+            "indicator": {
+              "id": "indicator:step:place-order#2@1",
+              "type": "indicator",
+              "subject": "step:place-order#2",
+              "metric": "inventory/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"route":"/reserve","method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "Step 2 of place-order: checkout → inventory over http (POST /reserve)"
+          },
+          {
+            "id": "c5",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#3",
+            "indicator": {
+              "id": "indicator:step:place-order#3@1",
+              "type": "indicator",
+              "subject": "step:place-order#3",
+              "metric": "checkout/db_client_operation_duration_seconds",
+              "roles": ["throughput","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"operation":"UPDATE","table":"orders"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","latency"],
+            "rationale": "Step 3 of place-order: checkout → orders-pg over sql (UPDATE orders)"
+          },
+          {
+            "id": "c6",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#4",
+            "indicator": {
+              "id": "indicator:step:place-order#4@1",
+              "type": "indicator",
+              "subject": "step:place-order#4",
+              "metric": "payments/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"route":"/charges","method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "Step 4 of place-order: checkout → payments over http (POST /charges)"
+          },
+          {
+            "id": "c7",
+            "tier": "localise",
+            "kind": "indicator",
+            "subject": "step:place-order#5",
+            "indicator": {
+              "id": "indicator:step:place-order#5@1",
+              "type": "indicator",
+              "subject": "step:place-order#5",
+              "metric": "payments/http_client_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {"method":"POST"},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "rationale": "Step 5 of place-order: payments → payment-provider over http (POST)"
+          },
+          {
+            "id": "c8",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:checkout",
+            "indicator": {
+              "id": "indicator:component:checkout@1",
+              "type": "indicator",
+              "subject": "component:checkout",
+              "metric": "checkout/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "when": {"failingSteps":["step:place-order#1"]},
+            "rationale": "checkout serves the failing hop"
+          },
+          {
+            "id": "c9",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:checkout",
+            "indicator": {
+              "id": "indicator:component:checkout@2",
+              "type": "indicator",
+              "subject": "component:checkout",
+              "metric": "checkout/db_client_connections_usage",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "when": {
+              "failingSteps": ["step:place-order#1","step:place-order#2","step:place-order#3","step:place-order#4"]
+            },
+            "rationale": "checkout serves the failing hop"
+          },
+          {
+            "id": "c10",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:checkout",
+            "indicator": {
+              "id": "indicator:component:checkout@3",
+              "type": "indicator",
+              "subject": "component:checkout",
+              "metric": "checkout/db_client_connections_pending_requests",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "when": {
+              "failingSteps": ["step:place-order#1","step:place-order#2","step:place-order#3","step:place-order#4"]
+            },
+            "rationale": "checkout serves the failing hop"
+          },
+          {
+            "id": "c11",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:inventory",
+            "indicator": {
+              "id": "indicator:component:inventory@1",
+              "type": "indicator",
+              "subject": "component:inventory",
+              "metric": "inventory/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "when": {"failingSteps":["step:place-order#1","step:place-order#2"]},
+            "rationale": "checkout depends on inventory (hard)"
+          },
+          {
+            "id": "c12",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:orders-pg",
+            "indicator": {
+              "id": "indicator:component:orders-pg@1",
+              "type": "indicator",
+              "subject": "component:orders-pg",
+              "metric": "orders-pg/pg_stat_activity_max_tx_duration",
+              "roles": ["saturation"],
+              "expect": {"kind":"threshold","max":30},
+              "selector": {},
+              "provenance": "declared"
+            },
+            "roles": ["saturation"],
+            "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+            "rationale": "checkout depends on orders-pg (hard)"
+          },
+          {
+            "id": "c13",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:orders-pg",
+            "indicator": {
+              "id": "indicator:component:orders-pg@2",
+              "type": "indicator",
+              "subject": "component:orders-pg",
+              "metric": "orders-pg/pg_stat_activity_count",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+            "rationale": "checkout depends on orders-pg (hard)"
+          },
+          {
+            "id": "c14",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:orders-pg",
+            "indicator": {
+              "id": "indicator:component:orders-pg@3",
+              "type": "indicator",
+              "subject": "component:orders-pg",
+              "metric": "orders-pg/pg_locks_count",
+              "roles": ["saturation"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["saturation"],
+            "when": {"failingSteps":["step:place-order#1","step:place-order#3"]},
+            "rationale": "checkout depends on orders-pg (hard)"
+          },
+          {
+            "id": "c15",
+            "tier": "explain",
+            "kind": "indicator",
+            "subject": "component:payments",
+            "indicator": {
+              "id": "indicator:component:payments@1",
+              "type": "indicator",
+              "subject": "component:payments",
+              "metric": "payments/http_server_request_duration_seconds",
+              "roles": ["throughput","errors","latency"],
+              "expect": {"kind":"baseline"},
+              "selector": {},
+              "provenance": "derived"
+            },
+            "roles": ["throughput","errors","latency"],
+            "when": {"failingSteps":["step:place-order#1","step:place-order#4"]},
+            "rationale": "checkout depends on payments (hard)"
+          },
+          {
+            "id": "c16",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/api/checkout","method":"POST"},
+            "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+            "when": {"failingSteps":["step:place-order#1"]},
+            "rationale": "Logs of checkout around the hop"
+          },
+          {
+            "id": "c17",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/api/checkout","method":"POST"},
+            "hop": {"dependency":"dependency:web/checkout-api","side":"target"},
+            "when": {"failingSteps":["step:place-order#1"]},
+            "rationale": "Spans of checkout for the hop"
+          },
+          {
+            "id": "c18",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/reserve","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+            "when": {"failingSteps":["step:place-order#2"]},
+            "rationale": "Logs of checkout around the hop"
+          },
+          {
+            "id": "c19",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:inventory",
+            "roles": [],
+            "match": {"route":"/reserve","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+            "when": {"failingSteps":["step:place-order#2"]},
+            "rationale": "Logs of inventory around the hop"
+          },
+          {
+            "id": "c20",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/reserve","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/reserve-stock","side":"caller"},
+            "when": {"failingSteps":["step:place-order#2"]},
+            "rationale": "Spans of checkout for the hop"
+          },
+          {
+            "id": "c21",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:inventory",
+            "roles": [],
+            "match": {"route":"/reserve","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/reserve-stock","side":"target"},
+            "when": {"failingSteps":["step:place-order#2"]},
+            "rationale": "Spans of inventory for the hop"
+          },
+          {
+            "id": "c22",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:orders-reconcile",
+            "roles": [],
+            "hop": {"dependency":"dependency:orders-reconcile/orders-db","side":"caller"},
+            "when": {"failingSteps":["step:place-order#3"]},
+            "rationale": "Logs of orders-reconcile: orders-reconcile also uses orders-pg"
+          },
+          {
+            "id": "c23",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"operation":"UPDATE","table":"orders"},
+            "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+            "when": {"failingSteps":["step:place-order#3"]},
+            "rationale": "Logs of checkout around the hop"
+          },
+          {
+            "id": "c24",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:orders-pg",
+            "roles": [],
+            "match": {"operation":"UPDATE","table":"orders"},
+            "hop": {"dependency":"dependency:checkout/orders-db","side":"target"},
+            "when": {"failingSteps":["step:place-order#3"]},
+            "rationale": "Logs of orders-pg around the hop"
+          },
+          {
+            "id": "c25",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"operation":"UPDATE","table":"orders"},
+            "hop": {"dependency":"dependency:checkout/orders-db","side":"caller"},
+            "when": {"failingSteps":["step:place-order#3"]},
+            "rationale": "Spans of checkout for the hop"
+          },
+          {
+            "id": "c26",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/charges","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+            "when": {"failingSteps":["step:place-order#4"]},
+            "rationale": "Logs of checkout around the hop"
+          },
+          {
+            "id": "c27",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:payments",
+            "roles": [],
+            "match": {"route":"/charges","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+            "when": {"failingSteps":["step:place-order#4"]},
+            "rationale": "Logs of payments around the hop"
+          },
+          {
+            "id": "c28",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:checkout",
+            "roles": [],
+            "match": {"route":"/charges","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/charge","side":"caller"},
+            "when": {"failingSteps":["step:place-order#4"]},
+            "rationale": "Spans of checkout for the hop"
+          },
+          {
+            "id": "c29",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:payments",
+            "roles": [],
+            "match": {"route":"/charges","method":"POST"},
+            "hop": {"dependency":"dependency:checkout/charge","side":"target"},
+            "when": {"failingSteps":["step:place-order#4"]},
+            "rationale": "Spans of payments for the hop"
+          },
+          {
+            "id": "c30",
+            "tier": "corroborate",
+            "kind": "logs",
+            "subject": "component:payments",
+            "roles": [],
+            "match": {"method":"POST"},
+            "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+            "when": {"failingSteps":["step:place-order#5"]},
+            "rationale": "Logs of payments around the hop"
+          },
+          {
+            "id": "c31",
+            "tier": "corroborate",
+            "kind": "traces",
+            "subject": "component:payments",
+            "roles": [],
+            "match": {"method":"POST"},
+            "hop": {"dependency":"dependency:payments/provider","side":"caller"},
+            "when": {"failingSteps":["step:place-order#5"]},
+            "rationale": "Spans of payments for the hop"
+          }
+        ],
+        "blindSpots": [
+          {"vertex":"component:web","reason":"no-telemetry"},
+          {"vertex":"component:payment-provider","reason":"no-telemetry"},
+          {"vertex":"component:stock-cache","reason":"no-telemetry"},
+          {"vertex":"component:orders-reconcile","reason":"no-indicators"}
+        ],
+        "omittedChecks": 0
+      },
+      "results": [
+        {
+          "result": "r1",
+          "kind": "indicator",
+          "check": "c1",
+          "indicator": "indicator:functionality:checkout@1",
+          "subject": "functionality:checkout",
+          "role": "kpi",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "down",
+          "unit": "per second",
+          "baseline": {"median":118.2,"spread":4.071},
+          "peak": {"value":94.66,"at":"2026-10-17T07:59:36.000Z","z":5.778,"effectPercent":-19.9},
+          "longestRun": 4,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r2",
+          "kind": "indicator",
+          "check": "c2",
+          "indicator": "indicator:flow:place-order@1",
+          "subject": "flow:place-order",
+          "role": "latency",
+          "expectation": "slo",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": "met",
+          "bounds": "p99 ≤ 1",
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r3",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":118.2,"spread":4.037},
+          "peak": {"value":126.9,"at":"2026-10-17T07:59:47.000Z","z":2.151,"effectPercent":7.348},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r4",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.001169,"spread":0.0002963},
+          "peak": {"value":0.1901,"at":"2026-10-17T07:59:36.000Z","z":637.7,"effectPercent":16170},
+          "longestRun": 25,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r5",
+          "kind": "indicator",
+          "check": "c3",
+          "indicator": "indicator:step:place-order#1@1",
+          "subject": "step:place-order#1",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.1776,"spread":0.01092},
+          "peak": {"value":0.6515,"at":"2026-10-17T07:59:36.000Z","z":43.41,"effectPercent":266.8},
+          "longestRun": 14,
+          "onset": "2026-10-17T07:59:36.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r6",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "down",
+          "unit": "per second",
+          "baseline": {"median":139.9,"spread":4.172},
+          "peak": {"value":127.5,"at":"2026-10-17T07:59:35.000Z","z":2.975,"effectPercent":-8.872},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r7",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0003952,"spread":0.0001012},
+          "peak": {"value":0.0006717,"at":"2026-10-17T07:59:33.000Z","z":2.733,"effectPercent":69.96},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r8",
+          "kind": "indicator",
+          "check": "c4",
+          "indicator": "indicator:step:place-order#2@1",
+          "subject": "step:place-order#2",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.09046,"spread":0.00787},
+          "peak": {"value":0.1066,"at":"2026-10-17T07:58:31.000Z","z":2.047,"effectPercent":17.81},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r9",
+          "kind": "indicator",
+          "check": "c5",
+          "indicator": "indicator:step:place-order#3@1",
+          "subject": "step:place-order#3",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r10",
+          "kind": "indicator",
+          "check": "c5",
+          "indicator": "indicator:step:place-order#3@1",
+          "subject": "step:place-order#3",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r11",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.03,"spread":1.795},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.681,"effectPercent":9.25},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r12",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0008328,"spread":0.0001735},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2590,"effectPercent":53950},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r13",
+          "kind": "indicator",
+          "check": "c6",
+          "indicator": "indicator:step:place-order#4@1",
+          "subject": "step:place-order#4",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2091,"spread":0.01442},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":22.57,"effectPercent":155.6},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r14",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "per second",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r15",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.0005,"spread":0.000005},
+          "peak": {"value":0.62,"at":"2026-10-17T07:59:35.000Z","z":123900,"effectPercent":123900},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r16",
+          "kind": "indicator",
+          "check": "c7",
+          "indicator": "indicator:step:place-order#5@1",
+          "subject": "step:place-order#5",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "no-data",
+          "direction": null,
+          "unit": "seconds",
+          "baseline": null,
+          "peak": null,
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 0,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r17",
+          "kind": "logs",
+          "check": "c30",
+          "subject": "component:payments",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z"},
+          "baseline": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T07:59:00.000Z"},
+          "filter": {"contains":null,"narrowedBy":{},"ignored":["method"]},
+          "sampled": {"window":445,"baseline":385,"slices":4,"capped":false},
+          "streamNew": false,
+          "templates": {
+            "new": [
+              {
+                "id": "7d4ae092",
+                "template": "provider request failed",
+                "count": {"window":68,"baseline":0},
+                "severity": "error",
+                "share": 0.153,
+                "firstSeen": "2026-10-17T07:59:35.251Z",
+                "lastSeen": "2026-10-17T07:59:57.642Z",
+                "confirmedAbsent": true,
+                "examples": [
+                  {
+                    "at": "2026-10-17T07:59:35.251Z",
+                    "fields": {
+                      "severity": "error",
+                      "message": "provider request failed",
+                      "paymentId": "pay_fdb046c3376b65c6a39b5a34",
+                      "traceId": "305a7f62870b9e26078f26f0e66e47ca"
+                    }
+                  },
+                  {
+                    "at": "2026-10-17T07:59:57.642Z",
+                    "fields": {
+                      "severity": "error",
+                      "message": "provider request failed",
+                      "paymentId": "pay_14b9494f33555ec41b93e83c",
+                      "traceId": "60bc1b17c32a4870348244bbef72beed"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "4ed28c77",
+                "template": "retry budget exhausted",
+                "count": {"window":14,"baseline":0},
+                "severity": "error",
+                "share": 0.0315,
+                "firstSeen": "2026-10-17T07:59:35.282Z",
+                "lastSeen": "2026-10-17T07:59:49.224Z",
+                "confirmedAbsent": true,
+                "examples": [
+                  {
+                    "at": "2026-10-17T07:59:35.282Z",
+                    "fields": {"severity":"error","message":"retry budget exhausted"}
+                  },
+                  {
+                    "at": "2026-10-17T07:59:49.224Z",
+                    "fields": {"severity":"error","message":"retry budget exhausted"}
+                  }
+                ]
+              }
+            ],
+            "surging": [],
+            "steady": [
+              {
+                "id": "e611a27c",
+                "template": "charge authorized",
+                "count": {"window":359,"baseline":378},
+                "severity": "info"
+              },
+              {
+                "id": "b17fcbc3",
+                "template": "provider latency high",
+                "count": {"window":4,"baseline":7},
+                "severity": "warn"
+              }
+            ],
+            "vanished": []
+          },
+          "correlation": null,
+          "redaction": {"records":830,"fieldsDropped":2615,"truncated":0,"matches":{}},
+          "problem": null
+        },
+        {
+          "result": "r18",
+          "kind": "traces",
+          "check": "c31",
+          "subject": "component:payments",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z"},
+          "baseline": {"start":"2026-10-17T07:58:00.000Z","end":"2026-10-17T07:59:00.000Z"},
+          "filter": {
+            "side": "caller",
+            "operation": null,
+            "errorsOnly": false,
+            "narrowedBy": {"method":"POST"},
+            "ignored": []
+          },
+          "sampled": {"window":20,"baseline":20,"errorTraces":{"window":10,"baseline":1},"errorLimit":10},
+          "operations": [
+            {
+              "name": "POST /v1/payment_intents",
+              "changes": ["errors"],
+              "spans": {"window":20,"baseline":20},
+              "durationMs": {"p50":{"window":65,"baseline":61},"p95":{"window":160,"baseline":159}},
+              "shareOfRoot": {"window":0.5123,"baseline":0.4857},
+              "errorTraces": {"window":10,"baseline":1},
+              "errorTypes": ["502"]
+            }
+          ],
+          "exemplar": {
+            "traceId": "b5c5c42d2a9491b46986777b0510dca2",
+            "durationMs": 405.662542,
+            "spans": [
+              {
+                "depth": 0,
+                "service": "payments",
+                "name": "POST /charges",
+                "kind": "server",
+                "durationMs": 405.662542,
+                "status": "error",
+                "message": null,
+                "attributes": {
+                  "http.request.method": "POST",
+                  "http.route": "/charges",
+                  "http.response.status_code": 502
+                },
+                "exceptions": []
+              },
+              {
+                "depth": 1,
+                "service": "payments",
+                "name": "POST /v1/payment_intents",
+                "kind": "client",
+                "durationMs": 327.438827,
+                "status": "error",
+                "message": "502 Bad Gateway from api.stripe.com",
+                "attributes": {
+                  "http.request.method": "POST",
+                  "server.address": "api.stripe.com",
+                  "http.response.status_code": 502,
+                  "error.type": "502"
+                },
+                "exceptions": [{"type":null,"message":"502 Bad Gateway from api.stripe.com"}]
+              }
+            ],
+            "omittedSpans": 0
+          },
+          "redaction": {"records":53,"fieldsDropped":0,"truncated":0,"matches":{}},
+          "problem": null
+        },
+        {
+          "result": "r19",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "throughput",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "normal",
+          "direction": "up",
+          "unit": "per second",
+          "baseline": {"median":52.32,"spread":1.599},
+          "peak": {"value":56.85,"at":"2026-10-17T07:59:29.000Z","z":2.831,"effectPercent":8.651},
+          "longestRun": 0,
+          "onset": null,
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r20",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "errors",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "ratio",
+          "baseline": {"median":0.00081,"spread":0.0002052},
+          "peak": {"value":0.4501,"at":"2026-10-17T07:59:35.000Z","z":2190,"effectPercent":55470},
+          "longestRun": 26,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        },
+        {
+          "result": "r21",
+          "kind": "indicator",
+          "check": "c15",
+          "indicator": "indicator:component:payments@1",
+          "subject": "component:payments",
+          "role": "latency",
+          "expectation": "baseline",
+          "window": {"start":"2026-10-17T07:59:00.000Z","end":"2026-10-17T08:00:00.000Z","stepSeconds":1},
+          "verdict": null,
+          "bounds": null,
+          "signal": "anomalous",
+          "direction": "up",
+          "unit": "seconds",
+          "baseline": {"median":0.2131,"spread":0.01551},
+          "peak": {"value":0.5345,"at":"2026-10-17T07:59:35.000Z","z":20.73,"effectPercent":150.8},
+          "longestRun": 12,
+          "onset": "2026-10-17T07:59:35.000Z",
+          "breachOnset": null,
+          "coverage": 1,
+          "zoom": null,
+          "problem": null
+        }
+      ],
+      "redaction": {
+        "totals": {"records":883,"fieldsDropped":2615,"truncated":0,"matches":{}},
+        "droppedFields": [
+          {
+            "subject": "component:payments",
+            "fields": [
+              "amount_cents",
+              "attempt",
+              "attempts",
+              "currency",
+              "duration_ms",
+              "error",
+              "idempotency_key",
+              "provider",
+              "server_address",
+              "status"
+            ]
+          }
+        ]
+      },
+      "reachedPruned": [],
+      "usage": {
+        "turns": 5,
+        "toolCalls": 5,
+        "inputTokens": 42508,
+        "outputTokens": 4124,
+        "cachedInputTokens": 16492,
+        "toolCost": 55,
+        "elapsedMs": 52808
+      },
+      "outcome": "cause-found",
+      "conclusion": {
+        "outcome": "cause-found",
+        "summary": "Starting at 07:59:35Z, the card processor (api.stripe.com) began returning 502 Bad Gateway to payments' POST /v1/payment_intents calls, failing up to 62% of them. Payments ran out of retries and sent 502s back to checkout, so about 19% of POST /api/checkout requests failed, latency went up and successful checkouts fell about 20%. Stripe sends us no telemetry of its own, so this rests on payments' client-side view of it: its metrics, spans and logs.",
+        "cause": {
+          "vertex": "component:payment-provider",
+          "mechanism": "The external card processor api.stripe.com started answering payment-intent requests with 502 Bad Gateway at 07:59:35Z. Payments' retry budget ran out and the failures passed up through POST /charges to checkout."
+        },
+        "origin": {"step":"step:place-order#5","uncertain":false},
+        "verdicts": [
+          {
+            "result": "r1",
+            "verdict": "unhealthy",
+            "reason": "Checkout KPI fell 19.9% (z 5.8) starting 07:59:36Z."
+          },
+          {
+            "result": "r2",
+            "verdict": "healthy",
+            "reason": "The p99 ≤ 1s SLO is met, although latency rose from 0.18s to 0.65s."
+          },
+          {"result":"r3","verdict":"healthy","reason":"Step 1 throughput is normal."},
+          {
+            "result": "r4",
+            "verdict": "unhealthy",
+            "reason": "Step 1 error ratio went from 0.1% to 19%, starting 07:59:36Z."
+          },
+          {"result":"r5","verdict":"unhealthy","reason":"Step 1 latency is up 267%."},
+          {"result":"r6","verdict":"healthy","reason":"Reserve-stock throughput is normal."},
+          {"result":"r7","verdict":"healthy","reason":"Reserve-stock errors are normal."},
+          {"result":"r8","verdict":"healthy","reason":"Reserve-stock latency is normal."},
+          {
+            "result": "r9",
+            "verdict": "no-data",
+            "reason": "No UPDATE orders metrics. This step sits above the deepest unhealthy step, so the origin stays certain."
+          },
+          {"result":"r10","verdict":"no-data","reason":"No UPDATE orders latency metrics."},
+          {"result":"r11","verdict":"healthy","reason":"POST /charges throughput is normal."},
+          {
+            "result": "r12",
+            "verdict": "unhealthy",
+            "reason": "POST /charges error ratio reached 45%, starting 07:59:35Z."
+          },
+          {"result":"r13","verdict":"unhealthy","reason":"POST /charges latency is up 156%."},
+          {"result":"r14","verdict":"no-data","reason":"No provider-call throughput series."},
+          {
+            "result": "r15",
+            "verdict": "unhealthy",
+            "reason": "Provider-call error ratio went from 0.05% to 62%, starting 07:59:35Z. This is the deepest unhealthy step."
+          },
+          {"result":"r16","verdict":"no-data","reason":"No provider-call latency series."},
+          {"result":"r19","verdict":"healthy","reason":"Payments throughput is normal."},
+          {"result":"r20","verdict":"unhealthy","reason":"Payments error ratio reached 45%."},
+          {"result":"r21","verdict":"unhealthy","reason":"Payments latency is up 151%."}
+        ],
+        "evidence": ["r15","r18","r17","r12","r20","r4","r1"],
+        "confidence": 0.9,
+        "mitigations": [
+          {
+            "tier": "immediate",
+            "action": "Check Stripe's status page and raise an incident with Stripe. Meanwhile, let customers know payment is degraded, or switch on a backup processor if one is set up.",
+            "tradeoff": "We can't fix this ourselves. A failover means a different processor, which can change fees and fraud rules."
+          },
+          {
+            "tier": "short-term",
+            "action": "In payments, add a circuit breaker and retries with jittered exponential backoff on provider 5xx responses, using idempotency keys. Have checkout queue or defer the charge and keep the order and stock reservation, instead of failing the request outright.",
+            "tradeoff": "Deferred charges mean we take some orders that may not get paid, which adds reconciliation and fraud exposure. Retrying more also makes checkout slower."
+          },
+          {
+            "tier": "prevention",
+            "action": "Set up multi-provider payment routing. Alert on provider-call error ratio. Fill the missing provider-call throughput and latency metrics in payments' client instrumentation, plus the missing checkout metrics for UPDATE orders.",
+            "tradeoff": "A second provider costs more to integrate and run and needs its own compliance work. More metrics mean more instrumentation to maintain."
+          }
+        ]
+      }
+    }
+  }
+}

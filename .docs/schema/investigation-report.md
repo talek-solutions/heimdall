@@ -21,6 +21,12 @@ never read as a cause and every rule is tested without a model.
 
 ## Fields (schema version 1)
 
+The published JSON Schema is
+[`report.v1.schema.json`](../../libs/investigation/schema/report.v1.schema.json)
+(`urn:heimdall:schema:report:v1`). It also accepts the reports recorded before `schemaVersion`
+existed, and it holds the definitions of the plan and of each result kind
+([ADR 0019](../adr/0019-published-schemas-for-transcripts-and-scorecards.md)).
+
 | Field | Content |
 |---|---|
 | `schemaVersion` | `1`. Bumped only by a breaking change; adding a field is not one |

@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heimdall:schema:transcript:v1",
+  "title": "Heimdall run transcript, version 1",
+  "description": "One recorded run: `~/.heimdall/runs/<recordedAt>-<6 hex>.json` (ADR 0019). Describes the file as written, before the `$number` encoding is decoded. Objects allow unknown properties. Telemetry requests and results, and model requests and responses, are left open: they are provider-shaped, and readers show them rather than interpret them.",
+  "type": "object",
+  "properties": {
+    "version": { "const": 1 },
+    "meta": { "$ref": "#/$defs/meta" },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "variables": {
+          "description": "Allowlisted variables only; never keys or tokens.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["variables"]
+    },
+    "pins": {
+      "description": "Values pinned for replay, by name.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/pinned" }
+    },
+    "model": { "type": "array", "items": { "$ref": "#/$defs/modelExchange" } },
+    "telemetry": { "type": "array", "items": { "$ref": "#/$defs/telemetryExchange" } },
+    "outcome": { "$ref": "#/$defs/outcome" }
+  },
+  "required": ["version", "meta", "environment", "pins", "model", "telemetry", "outcome"],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "properties": { "errorCode": { "type": "string" }, "message": { "type": "string" } },
+      "required": ["errorCode"]
+    },
+    "command": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string" },
+        "environment": { "type": "string" },
+        "since": { "type": "string" },
+        "entry": { "type": "string" },
+        "planOnly": { "type": "boolean" }
+      },
+      "required": ["query", "planOnly"]
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "heimdall": { "description": "The Heimdall version that recorded the run.", "type": "string" },
+        "recordedAt": { "type": "string" },
+        "command": { "$ref": "#/$defs/command" },
+        "manifest": {
+          "type": "object",
+          "properties": { "sha256": { "type": "string" }, "content": { "type": "string" } },
+          "required": ["sha256", "content"]
+        },
+        "datasources": {
+          "description": "Which backends were fixtures, and the scenario and anchor when one was.",
+          "type": "object",
+          "properties": {
+            "datasources": { "type": "object", "additionalProperties": { "type": "string" } },
+            "fixture": {
+              "type": "object",
+              "properties": { "scenario": { "type": "string" }, "anchor": { "type": "string" } },
+              "required": ["scenario", "anchor"]
+            }
+          },
+          "required": ["datasources"]
+        },
+        "runId": { "description": "Created when the run starts.", "type": "string" },
+        "commit": {
+          "description": "The commit of the Heimdall checkout; null outside one.",
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "dirty": { "description": "Written only when the checkout had uncommitted changes.", "type": "boolean" }
+      },
+      "required": ["heimdall", "recordedAt", "command", "manifest", "datasources"]
+    },
+    "pinned": {
+      "description": "A pinned value, or the error computing it raised.",
+      "type": "object",
+      "properties": { "value": {}, "error": { "$ref": "#/$defs/error" } }
+    },
+    "modelExchange": {
+      "type": "object",
+      "properties": {
+        "call": { "type": "integer", "minimum": 1 },
+        "request": { "type": "object" },
+        "response": { "type": "object" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "required": ["call", "request"]
+    },
+    "telemetryExchange": {
+      "type": "object",
+      "properties": {
+        "operation": { "enum": ["metrics.queryRange", "logs.queryRange", "traces.search", "traces.trace"] },
+        "source": { "description": "The source's URL.", "type": "string" },
+        "request": { "type": "object" },
+        "result": {},
+        "error": { "$ref": "#/$defs/error" },
+        "resultIds": {
+          "description": "The results this call served (ADR 0020). Absent on a run recorded before the link.",
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      },
+      "required": ["operation", "source", "request"]
+    },
+    "event": {
+      "description": "What the engine reported as it went. `type` selects the shape.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.started" },
+            "query": { "type": "string" },
+            "system": { "type": "string" },
+            "environment": { "$ref": "urn:heimdall:schema:report:v1#/$defs/environment" },
+            "window": { "$ref": "urn:heimdall:schema:report:v1#/$defs/investigationWindow" }
+          },
+          "required": ["type", "query", "system", "window"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.symptom_classified" },
+            "symptom": { "$ref": "urn:heimdall:schema:report:v1#/$defs/symptom" }
+          },
+          "required": ["type", "symptom"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.entry_located" },
+            "entry": { "$ref": "urn:heimdall:schema:report:v1#/$defs/entry" }
+          },
+          "required": ["type", "entry"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.scope_resolved" },
+            "scope": { "$ref": "urn:heimdall:schema:report:v1#/$defs/scope" }
+          },
+          "required": ["type", "scope"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.plan_ready" },
+            "plan": { "$ref": "urn:heimdall:schema:report:v1#/$defs/plan" }
+          },
+          "required": ["type", "plan"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.agent_turn" },
+            "turn": { "type": "integer", "minimum": 1 },
+            "finishReason": { "enum": ["stop", "length", "tool_calls", "content_filter", "paused", "other"] },
+            "toolCalls": { "type": "integer", "minimum": 0 },
+            "inputTokens": { "type": "integer", "minimum": 0 },
+            "outputTokens": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["type", "turn", "finishReason", "toolCalls", "inputTokens", "outputTokens"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.check_completed" },
+            "result": { "$ref": "urn:heimdall:schema:report:v1#/$defs/result" }
+          },
+          "required": ["type", "result"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "investigation.concluded" },
+            "report": { "$ref": "urn:heimdall:schema:report:v1" }
+          },
+          "required": ["type", "report"]
+        }
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "description": "The investigation events, without the final report: it is in `report`.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/event" }
+        },
+        "plan": {
+          "description": "Present on a plan-only run.",
+          "$ref": "urn:heimdall:schema:report:v1#/$defs/plan"
+        },
+        "report": { "$ref": "urn:heimdall:schema:report:v1" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "required": ["events"]
+    }
+  }
+}

@@ -1,0 +1,699 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heimdall:schema:report:v1",
+  "title": "Heimdall investigation report, version 1",
+  "description": "outcome.report of a run transcript, and the `--json` output of `heimdall investigate` (ADR 0019). Describes the file as written. Objects allow unknown properties. `schemaVersion` selects the branch; a report without one was recorded before version 1.",
+  "oneOf": [{ "$ref": "#/$defs/reportV1" }, { "$ref": "#/$defs/reportBeforeV1" }],
+  "$defs": {
+    "measure": {
+      "description": "A measured value. A number JSON cannot hold is written as { \"$number\": \"NaN\" | \"Infinity\" | \"-Infinity\" }.",
+      "anyOf": [
+        { "type": "number" },
+        {
+          "type": "object",
+          "properties": { "$number": { "enum": ["NaN", "Infinity", "-Infinity"] } },
+          "required": ["$number"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "role": { "enum": ["throughput", "errors", "latency", "saturation", "lag", "kpi"] },
+    "outcome": { "enum": ["cause-found", "no-signal", "inconclusive"] },
+    "resultVerdict": { "enum": ["healthy", "unhealthy", "no-data"] },
+    "hopSide": { "enum": ["caller", "target"] },
+    "countPair": {
+      "type": "object",
+      "properties": { "window": { "type": "integer", "minimum": 0 }, "baseline": { "type": "integer", "minimum": 0 } },
+      "required": ["window", "baseline"]
+    },
+    "durationPair": {
+      "type": "object",
+      "properties": {
+        "window": { "anyOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }] },
+        "baseline": { "anyOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }] }
+      },
+      "required": ["window", "baseline"]
+    },
+    "timeWindow": {
+      "type": "object",
+      "properties": { "start": { "type": "string" }, "end": { "type": "string" } },
+      "required": ["start", "end"]
+    },
+    "investigationWindow": {
+      "type": "object",
+      "properties": { "start": { "type": "string" }, "end": { "type": "string" }, "baseline": { "$ref": "#/$defs/timeWindow" } },
+      "required": ["start", "end", "baseline"]
+    },
+    "environment": {
+      "type": "object",
+      "properties": { "name": { "type": "string" }, "context": { "type": "string" } },
+      "required": ["name", "context"]
+    },
+    "symptom": {
+      "type": "object",
+      "properties": {
+        "roles": { "type": "array", "items": { "$ref": "#/$defs/role" } },
+        "method": { "enum": ["model", "unclassified"] }
+      },
+      "required": ["roles", "method"]
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "vertex": { "type": "string" },
+        "type": { "enum": ["functionality", "flow", "step", "dependency", "component", "member", "indicator"] },
+        "method": { "enum": ["model", "flag", "prompt"] },
+        "confidence": { "type": "number" },
+        "reason": { "type": "string" },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "vertex": { "type": "string" }, "confidence": { "type": "number" }, "reason": { "type": "string" } },
+            "required": ["vertex", "confidence", "reason"]
+          }
+        }
+      },
+      "required": ["vertex", "type", "method", "candidates"]
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "suspectFlows": { "type": "array", "items": { "type": "string" } },
+        "impactFlows": { "type": "array", "items": { "type": "string" } },
+        "vertices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "vertex": { "type": "string" },
+              "reason": {
+                "enum": [
+                  "entry",
+                  "functionality",
+                  "suspect-flow",
+                  "step",
+                  "path-dependency",
+                  "path-component",
+                  "routed-member",
+                  "neighbour",
+                  "contention"
+                ]
+              }
+            },
+            "required": ["vertex", "reason"]
+          }
+        },
+        "pruned": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "vertex": { "type": "string" },
+              "reason": { "enum": ["unreachable", "beyond-hop-budget", "not-routed"] }
+            },
+            "required": ["vertex", "reason"]
+          }
+        }
+      },
+      "required": ["suspectFlows", "impactFlows", "vertices", "pruned"]
+    },
+    "selector": {
+      "description": "Label meaning to value, as in a flow step's match.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "indicator": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "const": "indicator" },
+        "subject": { "type": "string" },
+        "metric": { "type": "string" },
+        "ratio": {
+          "type": "object",
+          "properties": { "numerator": { "type": "string" }, "denominator": { "type": "string" } },
+          "required": ["numerator", "denominator"]
+        },
+        "roles": { "type": "array", "items": { "$ref": "#/$defs/role" } },
+        "expect": {
+          "description": "The manifest's expectation, as declared: its other fields depend on the kind.",
+          "type": "object",
+          "properties": { "kind": { "enum": ["baseline", "slo", "threshold", "nonZero"] } },
+          "required": ["kind"]
+        },
+        "selector": { "$ref": "#/$defs/selector" },
+        "provenance": { "enum": ["declared", "derived"] },
+        "query": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "type", "subject", "roles", "expect", "selector", "provenance"]
+    },
+    "check": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tier": { "enum": ["confirm", "localise", "explain", "corroborate", "impact"] },
+        "kind": { "enum": ["indicator", "logs", "traces"] },
+        "subject": { "type": "string" },
+        "indicator": { "$ref": "#/$defs/indicator" },
+        "roles": { "type": "array", "items": { "$ref": "#/$defs/role" } },
+        "match": { "$ref": "#/$defs/selector" },
+        "correlationKey": { "type": "string" },
+        "hop": {
+          "type": "object",
+          "properties": { "dependency": { "type": "string" }, "side": { "$ref": "#/$defs/hopSide" } },
+          "required": ["dependency", "side"]
+        },
+        "when": {
+          "type": "object",
+          "properties": { "failingSteps": { "type": "array", "items": { "type": "string" } } },
+          "required": ["failingSteps"]
+        },
+        "rationale": { "type": "string" }
+      },
+      "required": ["id", "tier", "kind", "subject", "roles", "rationale"]
+    },
+    "blindSpot": {
+      "type": "object",
+      "properties": { "vertex": { "type": "string" }, "reason": { "enum": ["no-telemetry", "no-indicators"] } },
+      "required": ["vertex", "reason"]
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string" },
+        "system": { "type": "string" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "window": { "$ref": "#/$defs/investigationWindow" },
+        "symptom": { "$ref": "#/$defs/symptom" },
+        "entry": { "$ref": "#/$defs/entry" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+        "blindSpots": { "type": "array", "items": { "$ref": "#/$defs/blindSpot" } },
+        "omittedChecks": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["query", "system", "window", "symptom", "entry", "scope", "checks", "blindSpots", "omittedChecks"]
+    },
+    "problem": {
+      "type": "object",
+      "properties": { "errorCode": { "type": "string" }, "message": { "type": "string" } },
+      "required": ["errorCode", "message"]
+    },
+    "redactionCounts": {
+      "type": "object",
+      "properties": {
+        "records": { "type": "integer", "minimum": 0 },
+        "fieldsDropped": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "integer", "minimum": 0 },
+        "matches": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+      },
+      "required": ["records", "fieldsDropped", "truncated", "matches"]
+    },
+    "indicatorResult": {
+      "type": "object",
+      "properties": {
+        "result": { "type": "string" },
+        "check": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "subject": { "type": "string" },
+        "kind": { "const": "indicator" },
+        "indicator": { "type": "string" },
+        "role": { "$ref": "#/$defs/role" },
+        "expectation": { "enum": ["baseline", "slo", "threshold", "nonZero"] },
+        "verdict": { "anyOf": [{ "enum": ["met", "breached", "no-data"] }, { "type": "null" }] },
+        "bounds": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "signal": { "enum": ["no-data", "anomalous", "borderline", "normal"] },
+        "direction": { "anyOf": [{ "enum": ["up", "down"] }, { "type": "null" }] },
+        "unit": { "type": "string" },
+        "window": {
+          "type": "object",
+          "properties": { "start": { "type": "string" }, "end": { "type": "string" }, "stepSeconds": { "type": "number" } },
+          "required": ["start", "end", "stepSeconds"]
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "median": { "$ref": "#/$defs/measure" }, "spread": { "$ref": "#/$defs/measure" } },
+              "required": ["median", "spread"]
+            },
+            { "type": "null" }
+          ]
+        },
+        "peak": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "value": { "$ref": "#/$defs/measure" },
+                "at": { "type": "string" },
+                "z": { "$ref": "#/$defs/measure" },
+                "effectPercent": { "anyOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }] }
+              },
+              "required": ["value", "at", "z", "effectPercent"]
+            },
+            { "type": "null" }
+          ]
+        },
+        "longestRun": { "type": "integer", "minimum": 0 },
+        "onset": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "breachOnset": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "coverage": { "$ref": "#/$defs/measure" },
+        "zoom": { "anyOf": [{ "$ref": "#/$defs/timeWindow" }, { "type": "null" }] },
+        "problem": { "anyOf": [{ "$ref": "#/$defs/problem" }, { "type": "null" }] }
+      },
+      "required": [
+        "result",
+        "check",
+        "subject",
+        "kind",
+        "indicator",
+        "role",
+        "expectation",
+        "verdict",
+        "bounds",
+        "signal",
+        "direction",
+        "unit",
+        "window",
+        "baseline",
+        "peak",
+        "longestRun",
+        "onset",
+        "breachOnset",
+        "coverage",
+        "zoom",
+        "problem"
+      ]
+    },
+    "logTemplateCount": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "template": { "type": "string" },
+        "count": { "$ref": "#/$defs/countPair" },
+        "severity": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+      },
+      "required": ["id", "template", "count", "severity"]
+    },
+    "logTemplate": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "template": { "type": "string" },
+        "count": { "$ref": "#/$defs/countPair" },
+        "severity": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "share": { "$ref": "#/$defs/measure" },
+        "firstSeen": { "type": "string" },
+        "lastSeen": { "type": "string" },
+        "confirmedAbsent": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "at": { "type": "string" },
+              "fields": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "required": ["at", "fields"]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "template",
+        "count",
+        "severity",
+        "share",
+        "firstSeen",
+        "lastSeen",
+        "confirmedAbsent",
+        "examples"
+      ]
+    },
+    "logsResult": {
+      "type": "object",
+      "properties": {
+        "result": { "type": "string" },
+        "check": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "subject": { "type": "string" },
+        "redaction": { "$ref": "#/$defs/redactionCounts" },
+        "problem": { "anyOf": [{ "$ref": "#/$defs/problem" }, { "type": "null" }] },
+        "kind": { "const": "logs" },
+        "window": { "$ref": "#/$defs/timeWindow" },
+        "baseline": { "$ref": "#/$defs/timeWindow" },
+        "filter": {
+          "type": "object",
+          "properties": {
+            "contains": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "narrowedBy": { "type": "object", "additionalProperties": { "type": "string" } },
+            "ignored": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["contains", "narrowedBy", "ignored"]
+        },
+        "sampled": {
+          "type": "object",
+          "properties": {
+            "window": { "type": "integer", "minimum": 0 },
+            "baseline": { "type": "integer", "minimum": 0 },
+            "slices": { "type": "integer", "minimum": 0 },
+            "capped": { "type": "boolean" }
+          },
+          "required": ["window", "baseline", "slices", "capped"]
+        },
+        "streamNew": { "type": "boolean" },
+        "templates": {
+          "type": "object",
+          "properties": {
+            "new": { "type": "array", "items": { "$ref": "#/$defs/logTemplate" } },
+            "surging": { "type": "array", "items": { "$ref": "#/$defs/logTemplate" } },
+            "steady": { "type": "array", "items": { "$ref": "#/$defs/logTemplateCount" } },
+            "vanished": { "type": "array", "items": { "$ref": "#/$defs/logTemplateCount" } }
+          },
+          "required": ["new", "surging", "steady", "vanished"]
+        },
+        "correlation": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "key": { "type": "string" }, "values": { "type": "array", "items": { "type": "string" } } },
+              "required": ["key", "values"]
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": [
+        "result",
+        "check",
+        "subject",
+        "redaction",
+        "problem",
+        "kind",
+        "window",
+        "baseline",
+        "filter",
+        "sampled",
+        "streamNew",
+        "templates",
+        "correlation"
+      ]
+    },
+    "traceView": {
+      "type": "object",
+      "properties": {
+        "traceId": { "type": "string" },
+        "durationMs": { "$ref": "#/$defs/measure" },
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "depth": { "type": "integer", "minimum": 0 },
+              "service": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "name": { "type": "string" },
+              "kind": { "enum": ["unspecified", "internal", "server", "client", "producer", "consumer"] },
+              "durationMs": { "$ref": "#/$defs/measure" },
+              "status": { "enum": ["unset", "ok", "error"] },
+              "message": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "attributes": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean"] } },
+              "exceptions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "message": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["type", "message"]
+                }
+              }
+            },
+            "required": [
+              "depth",
+              "service",
+              "name",
+              "kind",
+              "durationMs",
+              "status",
+              "message",
+              "attributes",
+              "exceptions"
+            ]
+          }
+        },
+        "omittedSpans": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["traceId", "durationMs", "spans", "omittedSpans"]
+    },
+    "tracesResult": {
+      "type": "object",
+      "properties": {
+        "result": { "type": "string" },
+        "check": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "subject": { "type": "string" },
+        "redaction": { "$ref": "#/$defs/redactionCounts" },
+        "problem": { "anyOf": [{ "$ref": "#/$defs/problem" }, { "type": "null" }] },
+        "kind": { "const": "traces" },
+        "window": { "$ref": "#/$defs/timeWindow" },
+        "baseline": { "$ref": "#/$defs/timeWindow" },
+        "filter": {
+          "type": "object",
+          "properties": {
+            "side": { "anyOf": [{ "$ref": "#/$defs/hopSide" }, { "type": "null" }] },
+            "operation": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "errorsOnly": { "type": "boolean" },
+            "narrowedBy": { "type": "object", "additionalProperties": { "type": "string" } },
+            "ignored": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["side", "operation", "errorsOnly", "narrowedBy", "ignored"]
+        },
+        "sampled": {
+          "type": "object",
+          "properties": {
+            "window": { "type": "integer", "minimum": 0 },
+            "baseline": { "type": "integer", "minimum": 0 },
+            "errorTraces": { "$ref": "#/$defs/countPair" },
+            "errorLimit": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["window", "baseline", "errorTraces", "errorLimit"]
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "changes": { "type": "array", "items": { "enum": ["new", "slower", "errors"] } },
+              "spans": { "$ref": "#/$defs/countPair" },
+              "durationMs": {
+                "type": "object",
+                "properties": { "p50": { "$ref": "#/$defs/durationPair" }, "p95": { "$ref": "#/$defs/durationPair" } },
+                "required": ["p50", "p95"]
+              },
+              "shareOfRoot": { "$ref": "#/$defs/durationPair" },
+              "errorTraces": { "$ref": "#/$defs/countPair" },
+              "errorTypes": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["name", "changes", "spans", "durationMs", "shareOfRoot", "errorTraces", "errorTypes"]
+          }
+        },
+        "exemplar": { "anyOf": [{ "$ref": "#/$defs/traceView" }, { "type": "null" }] }
+      },
+      "required": [
+        "result",
+        "check",
+        "subject",
+        "redaction",
+        "problem",
+        "kind",
+        "window",
+        "baseline",
+        "filter",
+        "sampled",
+        "operations",
+        "exemplar"
+      ]
+    },
+    "traceResult": {
+      "type": "object",
+      "properties": {
+        "result": { "type": "string" },
+        "check": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "subject": { "type": "string" },
+        "redaction": { "$ref": "#/$defs/redactionCounts" },
+        "problem": { "anyOf": [{ "$ref": "#/$defs/problem" }, { "type": "null" }] },
+        "kind": { "const": "trace" },
+        "trace": { "anyOf": [{ "$ref": "#/$defs/traceView" }, { "type": "null" }] }
+      },
+      "required": ["result", "check", "subject", "redaction", "problem", "kind", "trace"]
+    },
+    "result": {
+      "description": "One result, exactly as the agent saw it. `kind` selects the shape.",
+      "oneOf": [
+        { "$ref": "#/$defs/indicatorResult" },
+        { "$ref": "#/$defs/logsResult" },
+        { "$ref": "#/$defs/tracesResult" },
+        { "$ref": "#/$defs/traceResult" }
+      ]
+    },
+    "conclusion": {
+      "type": "object",
+      "properties": {
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "summary": { "type": "string" },
+        "cause": {
+          "type": "object",
+          "properties": { "vertex": { "type": "string" }, "mechanism": { "type": "string" } },
+          "required": ["vertex", "mechanism"]
+        },
+        "origin": {
+          "type": "object",
+          "properties": { "step": { "type": "string" }, "uncertain": { "type": "boolean" } },
+          "required": ["step", "uncertain"]
+        },
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "result": { "type": "string" },
+              "verdict": { "$ref": "#/$defs/resultVerdict" },
+              "reason": { "type": "string" }
+            },
+            "required": ["result", "verdict", "reason"]
+          }
+        },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "number" },
+        "mitigations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tier": { "enum": ["immediate", "short-term", "prevention"] },
+              "action": { "type": "string" },
+              "tradeoff": { "type": "string" }
+            },
+            "required": ["tier", "action", "tradeoff"]
+          }
+        }
+      },
+      "required": ["outcome", "summary", "verdicts", "evidence", "confidence", "mitigations"]
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "points": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }] } },
+        "bucketSeconds": { "type": "number" },
+        "shape": { "enum": ["flat", "step", "ramp", "spike"] },
+        "state": { "anyOf": [{ "enum": ["ongoing", "recovering", "recovered"] }, { "type": "null" }] },
+        "last": { "anyOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }] }
+      },
+      "required": ["points", "bucketSeconds", "shape", "state", "last"]
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "turns": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
+        "toolCost": { "type": "number" },
+        "elapsedMs": { "type": "number" }
+      },
+      "required": ["turns", "toolCalls", "inputTokens", "outputTokens", "cachedInputTokens", "toolCost", "elapsedMs"]
+    },
+    "reportCommon": {
+      "type": "object",
+      "properties": {
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "agentReason": { "enum": ["no-stop-call", "refused", "pause-limit"] },
+        "plan": { "$ref": "#/$defs/plan" },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/result" } },
+        "redaction": {
+          "type": "object",
+          "properties": {
+            "totals": { "$ref": "#/$defs/redactionCounts" },
+            "droppedFields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": { "subject": { "type": "string" }, "fields": { "type": "array", "items": { "type": "string" } } },
+                "required": ["subject", "fields"]
+              }
+            }
+          },
+          "required": ["totals", "droppedFields"]
+        },
+        "reachedPruned": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "vertex": { "type": "string" }, "reason": { "type": "string" } },
+            "required": ["vertex", "reason"]
+          }
+        },
+        "usage": { "$ref": "#/$defs/usage" },
+        "traceId": { "type": "string" }
+      },
+      "required": ["outcome", "plan", "results", "redaction", "reachedPruned", "usage"]
+    },
+    "reportV1": {
+      "description": "A report with `schemaVersion: 1`.",
+      "allOf": [
+        { "$ref": "#/$defs/reportCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "keyFigures": { "type": "array", "items": { "type": "string" } },
+            "blindSpots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "vertex": { "type": "string" },
+                  "reason": { "enum": ["no-telemetry", "no-indicators"] },
+                  "touches": { "enum": ["cause", "origin", "evidence"] }
+                },
+                "required": ["vertex", "reason", "touches"]
+              }
+            },
+            "impact": {
+              "type": "object",
+              "properties": {
+                "status": { "enum": ["not-planned", "not-run", "checked"] },
+                "subjects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "vertex": { "type": "string" },
+                      "verdict": { "anyOf": [{ "$ref": "#/$defs/resultVerdict" }, { "type": "null" }] },
+                      "results": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "required": ["vertex", "verdict", "results"]
+                  }
+                }
+              },
+              "required": ["status", "subjects"]
+            },
+            "profiles": {
+              "description": "By result id.",
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/profile" }
+            }
+          },
+          "required": ["schemaVersion", "keyFigures", "blindSpots", "impact", "profiles"]
+        }
+      ]
+    },
+    "reportBeforeV1": {
+      "description": "A report recorded before `schemaVersion` existed: no key figures, blind spots, impact or profiles.",
+      "allOf": [{ "$ref": "#/$defs/reportCommon" }, { "type": "object", "not": { "required": ["schemaVersion"] } }]
+    }
+  }
+}

@@ -1,0 +1,457 @@
+# Hand-score this run: 0, 1 or 2 per dimension (rubric: .docs/design/replay-and-evals.md).
+# Then move it to libs/evals/calibration/ and run heimdall eval --calibrate.
+case: error-burst-30s
+run: /home/engineer/.heimdall/runs/2026-10-31T19-06-51-087Z-fa1dcc.json
+judgeInput:
+  reference:
+    outcome: cause-found
+    origin: step:place-order#5
+    cause: component:payment-provider
+    mechanism: The external payment provider answers 502 for about 30 seconds, so
+      payments' calls to it fail and every checkout that charges a card fails
+      with them. Inventory and orders-pg are healthy; the errors start at the
+      deepest failing hop, payments to the provider.
+    evidence:
+      - the checkout KPI dips about 25 seconds before the anchor, and the
+        place-order p99 stays under its 1s SLO
+      - steps 1 (POST /api/checkout), 4 (POST /charges) and 5 (payments to the
+        provider) show errors; steps 2 and 3 are healthy
+      - payments' logs show the provider's 502 Bad Gateway, and its error spans
+        end at POST /v1/payment_intents
+      - payment-provider is a blind spot, so the conclusion rests on payments'
+        view of it
+  conclusion:
+    outcome: cause-found
+    summary: "Starting at 07:59:35Z, the card processor (api.stripe.com) began
+      returning 502 Bad Gateway to payments' POST /v1/payment_intents calls,
+      failing up to 62% of them. Payments ran out of retries and sent 502s back
+      to checkout, so about 19% of POST /api/checkout requests failed, latency
+      went up and successful checkouts fell about 20%. Stripe sends us no
+      telemetry of its own, so this rests on payments' client-side view of it:
+      its metrics, spans and logs."
+    cause:
+      vertex: component:payment-provider
+      mechanism: The external card processor api.stripe.com started answering
+        payment-intent requests with 502 Bad Gateway at 07:59:35Z. Payments'
+        retry budget ran out and the failures passed up through POST /charges to
+        checkout.
+    origin:
+      step: step:place-order#5
+      uncertain: false
+    verdicts:
+      - result: r1
+        verdict: unhealthy
+        reason: Checkout KPI fell 19.9% (z 5.8) starting 07:59:36Z.
+      - result: r2
+        verdict: healthy
+        reason: The p99 ≤ 1s SLO is met, although latency rose from 0.18s to 0.65s.
+      - result: r3
+        verdict: healthy
+        reason: Step 1 throughput is normal.
+      - result: r4
+        verdict: unhealthy
+        reason: Step 1 error ratio went from 0.1% to 19%, starting 07:59:36Z.
+      - result: r5
+        verdict: unhealthy
+        reason: Step 1 latency is up 267%.
+      - result: r6
+        verdict: healthy
+        reason: Reserve-stock throughput is normal.
+      - result: r7
+        verdict: healthy
+        reason: Reserve-stock errors are normal.
+      - result: r8
+        verdict: healthy
+        reason: Reserve-stock latency is normal.
+      - result: r9
+        verdict: no-data
+        reason: No UPDATE orders metrics. This step sits above the deepest unhealthy
+          step, so the origin stays certain.
+      - result: r10
+        verdict: no-data
+        reason: No UPDATE orders latency metrics.
+      - result: r11
+        verdict: healthy
+        reason: POST /charges throughput is normal.
+      - result: r12
+        verdict: unhealthy
+        reason: POST /charges error ratio reached 45%, starting 07:59:35Z.
+      - result: r13
+        verdict: unhealthy
+        reason: POST /charges latency is up 156%.
+      - result: r14
+        verdict: no-data
+        reason: No provider-call throughput series.
+      - result: r15
+        verdict: unhealthy
+        reason: Provider-call error ratio went from 0.05% to 62%, starting 07:59:35Z.
+          This is the deepest unhealthy step.
+      - result: r16
+        verdict: no-data
+        reason: No provider-call latency series.
+      - result: r19
+        verdict: healthy
+        reason: Payments throughput is normal.
+      - result: r20
+        verdict: unhealthy
+        reason: Payments error ratio reached 45%.
+      - result: r21
+        verdict: unhealthy
+        reason: Payments latency is up 151%.
+    evidence:
+      - r15
+      - r18
+      - r17
+      - r12
+      - r20
+      - r4
+      - r1
+    confidence: 0.9
+    mitigations:
+      - tier: immediate
+        action: Check Stripe's status page and raise an incident with Stripe. Meanwhile,
+          let customers know payment is degraded, or switch on a backup
+          processor if one is set up.
+        tradeoff: We can't fix this ourselves. A failover means a different processor,
+          which can change fees and fraud rules.
+      - tier: short-term
+        action: In payments, add a circuit breaker and retries with jittered exponential
+          backoff on provider 5xx responses, using idempotency keys. Have
+          checkout queue or defer the charge and keep the order and stock
+          reservation, instead of failing the request outright.
+        tradeoff: Deferred charges mean we take some orders that may not get paid, which
+          adds reconciliation and fraud exposure. Retrying more also makes
+          checkout slower.
+      - tier: prevention
+        action: Set up multi-provider payment routing. Alert on provider-call error
+          ratio. Fill the missing provider-call throughput and latency metrics
+          in payments' client instrumentation, plus the missing checkout metrics
+          for UPDATE orders.
+        tradeoff: A second provider costs more to integrate and run and needs its own
+          compliance work. More metrics mean more instrumentation to maintain.
+  citedResults:
+    - result: r1
+      kind: indicator
+      check: c1
+      indicator: indicator:functionality:checkout@1
+      subject: functionality:checkout
+      role: kpi
+      expectation: baseline
+      window:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+        stepSeconds: 1
+      verdict: null
+      bounds: null
+      signal: anomalous
+      direction: down
+      unit: per second
+      baseline:
+        median: 118.2
+        spread: 4.071
+      peak:
+        value: 94.66
+        at: 2026-10-17T07:59:36.000Z
+        z: 5.778
+        effectPercent: -19.9
+      longestRun: 4
+      onset: 2026-10-17T07:59:36.000Z
+      breachOnset: null
+      coverage: 1
+      zoom: null
+      problem: null
+    - result: r4
+      kind: indicator
+      check: c3
+      indicator: indicator:step:place-order#1@1
+      subject: step:place-order#1
+      role: errors
+      expectation: baseline
+      window:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+        stepSeconds: 1
+      verdict: null
+      bounds: null
+      signal: anomalous
+      direction: up
+      unit: ratio
+      baseline:
+        median: 0.001169
+        spread: 0.0002963
+      peak:
+        value: 0.1901
+        at: 2026-10-17T07:59:36.000Z
+        z: 637.7
+        effectPercent: 16170
+      longestRun: 25
+      onset: 2026-10-17T07:59:36.000Z
+      breachOnset: null
+      coverage: 1
+      zoom: null
+      problem: null
+    - result: r12
+      kind: indicator
+      check: c6
+      indicator: indicator:step:place-order#4@1
+      subject: step:place-order#4
+      role: errors
+      expectation: baseline
+      window:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+        stepSeconds: 1
+      verdict: null
+      bounds: null
+      signal: anomalous
+      direction: up
+      unit: ratio
+      baseline:
+        median: 0.0008328
+        spread: 0.0001735
+      peak:
+        value: 0.4501
+        at: 2026-10-17T07:59:35.000Z
+        z: 2590
+        effectPercent: 53950
+      longestRun: 26
+      onset: 2026-10-17T07:59:35.000Z
+      breachOnset: null
+      coverage: 1
+      zoom: null
+      problem: null
+    - result: r15
+      kind: indicator
+      check: c7
+      indicator: indicator:step:place-order#5@1
+      subject: step:place-order#5
+      role: errors
+      expectation: baseline
+      window:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+        stepSeconds: 1
+      verdict: null
+      bounds: null
+      signal: anomalous
+      direction: up
+      unit: ratio
+      baseline:
+        median: 0.0005
+        spread: 0.000005
+      peak:
+        value: 0.62
+        at: 2026-10-17T07:59:35.000Z
+        z: 123900
+        effectPercent: 123900
+      longestRun: 26
+      onset: 2026-10-17T07:59:35.000Z
+      breachOnset: null
+      coverage: 1
+      zoom: null
+      problem: null
+    - result: r17
+      kind: logs
+      check: c30
+      subject: component:payments
+      window:
+        start: 2026-10-17T07:59:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+      baseline:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T07:59:00.000Z
+      filter:
+        contains: null
+        narrowedBy: {}
+        ignored:
+          - method
+      sampled:
+        window: 445
+        baseline: 385
+        slices: 4
+        capped: false
+      streamNew: false
+      templates:
+        new:
+          - id: 7d4ae092
+            template: provider request failed
+            count:
+              window: 68
+              baseline: 0
+            severity: error
+            share: 0.153
+            firstSeen: 2026-10-17T07:59:35.251Z
+            lastSeen: 2026-10-17T07:59:57.642Z
+            confirmedAbsent: true
+            examples:
+              - at: 2026-10-17T07:59:35.251Z
+                fields:
+                  severity: error
+                  message: provider request failed
+                  paymentId: pay_fdb046c3376b65c6a39b5a34
+                  traceId: 305a7f62870b9e26078f26f0e66e47ca
+              - at: 2026-10-17T07:59:57.642Z
+                fields:
+                  severity: error
+                  message: provider request failed
+                  paymentId: pay_14b9494f33555ec41b93e83c
+                  traceId: 60bc1b17c32a4870348244bbef72beed
+          - id: 4ed28c77
+            template: retry budget exhausted
+            count:
+              window: 14
+              baseline: 0
+            severity: error
+            share: 0.0315
+            firstSeen: 2026-10-17T07:59:35.282Z
+            lastSeen: 2026-10-17T07:59:49.224Z
+            confirmedAbsent: true
+            examples:
+              - at: 2026-10-17T07:59:35.282Z
+                fields:
+                  severity: error
+                  message: retry budget exhausted
+              - at: 2026-10-17T07:59:49.224Z
+                fields:
+                  severity: error
+                  message: retry budget exhausted
+        surging: []
+        steady:
+          - id: e611a27c
+            template: charge authorized
+            count:
+              window: 359
+              baseline: 378
+            severity: info
+          - id: b17fcbc3
+            template: provider latency high
+            count:
+              window: 4
+              baseline: 7
+            severity: warn
+        vanished: []
+      correlation: null
+      redaction:
+        records: 830
+        fieldsDropped: 2615
+        truncated: 0
+        matches: {}
+      problem: null
+    - result: r18
+      kind: traces
+      check: c31
+      subject: component:payments
+      window:
+        start: 2026-10-17T07:59:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+      baseline:
+        start: 2026-10-17T07:58:00.000Z
+        end: 2026-10-17T07:59:00.000Z
+      filter:
+        side: caller
+        operation: null
+        errorsOnly: false
+        narrowedBy:
+          method: POST
+        ignored: []
+      sampled:
+        window: 20
+        baseline: 20
+        errorTraces:
+          window: 10
+          baseline: 1
+        errorLimit: 10
+      operations:
+        - name: POST /v1/payment_intents
+          changes:
+            - errors
+          spans:
+            window: 20
+            baseline: 20
+          durationMs:
+            p50:
+              window: 65
+              baseline: 61
+            p95:
+              window: 160
+              baseline: 159
+          shareOfRoot:
+            window: 0.5123
+            baseline: 0.4857
+          errorTraces:
+            window: 10
+            baseline: 1
+          errorTypes:
+            - "502"
+      exemplar:
+        traceId: b5c5c42d2a9491b46986777b0510dca2
+        durationMs: 405.662542
+        spans:
+          - depth: 0
+            service: payments
+            name: POST /charges
+            kind: server
+            durationMs: 405.662542
+            status: error
+            message: null
+            attributes:
+              http.request.method: POST
+              http.route: /charges
+              http.response.status_code: 502
+            exceptions: []
+          - depth: 1
+            service: payments
+            name: POST /v1/payment_intents
+            kind: client
+            durationMs: 327.438827
+            status: error
+            message: 502 Bad Gateway from api.stripe.com
+            attributes:
+              http.request.method: POST
+              server.address: api.stripe.com
+              http.response.status_code: 502
+              error.type: "502"
+            exceptions:
+              - type: null
+                message: 502 Bad Gateway from api.stripe.com
+        omittedSpans: 0
+      redaction:
+        records: 53
+        fieldsDropped: 0
+        truncated: 0
+        matches: {}
+      problem: null
+    - result: r20
+      kind: indicator
+      check: c15
+      indicator: indicator:component:payments@1
+      subject: component:payments
+      role: errors
+      expectation: baseline
+      window:
+        start: 2026-10-17T07:59:00.000Z
+        end: 2026-10-17T08:00:00.000Z
+        stepSeconds: 1
+      verdict: null
+      bounds: null
+      signal: anomalous
+      direction: up
+      unit: ratio
+      baseline:
+        median: 0.00081
+        spread: 0.0002052
+      peak:
+        value: 0.4501
+        at: 2026-10-17T07:59:35.000Z
+        z: 2190
+        effectPercent: 55470
+      longestRun: 26
+      onset: 2026-10-17T07:59:35.000Z
+      breachOnset: null
+      coverage: 1
+      zoom: null
+      problem: null
+human:
+  component: null
+  mechanism: null
+  evidence: null

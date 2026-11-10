@@ -1,0 +1,67 @@
+{
+  "startedAt": "2026-11-01T07:00:05.978Z",
+  "output": "/home/engineer/.heimdall/evals/2026-11-01T07-00-05-978Z",
+  "judge": {
+    "model": "claude-opus-5-5",
+    "status": "uncalibrated"
+  },
+  "runs": [
+    {
+      "case": "error-burst-30s",
+      "repeat": 1,
+      "status": "completed",
+      "exitCode": 0,
+      "outcome": "cause-found",
+      "transcript": "/home/engineer/.heimdall/evals/2026-11-01T07-00-05-978Z/runs/error-burst-30s-1/2026-11-01T07-00-06-219Z-944d79.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "pass",
+        "cause": "pass"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The conclusion names component:payment-provider, the same cause as the reference, with origin step:place-order#5."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "Its mechanism matches the reference: the external provider returns 502s to payments' payment_intents calls, and the failures pass up through POST /charges to checkout."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results support each step: r15 shows the deepest and earliest error onset at step 5, r12, r20 and r4 show the errors passing upstream, r1 shows the KPI dip, and r7 and r8 show inventory is healthy; r18's exemplar has the error span end at POST /v1/payment_intents with '502 Bad Gateway from api.stripe.com', and r17 shows provider failures and an exhausted retry budget; the provider blind spot is acknowledged."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-11-01T07-00-05-978Z/sheets/error-burst-30s-1.score.yaml",
+      "tokens": {
+        "investigation": {
+          "inputTokens": 23073,
+          "outputTokens": 2321
+        },
+        "judge": {
+          "inputTokens": 7155,
+          "outputTokens": 559
+        }
+      }
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "completed": 1,
+    "checks": {
+      "passed": 3,
+      "total": 3
+    },
+    "meanScores": {
+      "component": 2,
+      "mechanism": 2,
+      "evidence": 2
+    },
+    "tokens": {
+      "inputTokens": 30228,
+      "outputTokens": 2880
+    }
+  }
+}

@@ -1,0 +1,267 @@
+{
+  "startedAt": "2026-10-31T19:06:50.851Z",
+  "output": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z",
+  "judge": {
+    "model": "claude-opus-5-5",
+    "status": "uncalibrated"
+  },
+  "runs": [
+    {
+      "case": "error-burst-30s",
+      "repeat": 1,
+      "status": "completed",
+      "exitCode": 0,
+      "outcome": "cause-found",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-06-51-087Z-fa1dcc.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "pass",
+        "cause": "pass"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The conclusion names component:payment-provider (api.stripe.com), which matches the reference cause."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "Like the reference, it says the provider returned 502s, which made payments' calls fail and propagated through POST /charges to fail checkouts."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results support the claim: r15, r12 and r4 show the errors starting at the deepest hop, r17 and r18 show the provider 502s on POST /v1/payment_intents from payments' client view, and r1 shows the KPI drop. The verdicts also mark steps 2 and 3 healthy."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/error-burst-30s-1.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 42508,
+          "outputTokens": 4124
+        },
+        "judge": {
+          "inputTokens": 6417,
+          "outputTokens": 303
+        }
+      }
+    },
+    {
+      "case": "error-burst-30s",
+      "repeat": 2,
+      "status": "completed",
+      "exitCode": 0,
+      "outcome": "cause-found",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-07-55-009Z-15fa66.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "pass",
+        "cause": "pass"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The conclusion names component:payment-provider (api.stripe.com), the same component as the reference's cause."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "Like the reference, it says the provider returned 502s on payment-intent calls, so payments' /charges failed and checkout failed with it, starting at the deepest hop (step 5)."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results support each step of the claim: provider-client errors at 62% with the earliest onset (r15), errors on /charges and checkout (r12, r4), the KPI drop (r1), payments' logs showing provider failures and retry exhaustion (r17), and a trace showing a 502 from api.stripe.com on POST /v1/payment_intents (r18); the provider is also acknowledged as a blind spot."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/error-burst-30s-2.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 32236,
+          "outputTokens": 3693
+        },
+        "judge": {
+          "inputTokens": 6673,
+          "outputTokens": 502
+        }
+      }
+    },
+    {
+      "case": "error-burst-30s",
+      "repeat": 3,
+      "status": "completed",
+      "exitCode": 0,
+      "outcome": "cause-found",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-08-50-754Z-17a50d.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "pass",
+        "cause": "pass"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The conclusion names component:payment-provider at step:place-order#5, which matches the reference."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "Like the reference, it says the external provider returned 502s, payments' calls to it failed, and the failures spread through POST /charges up to checkout."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results back the claim: provider-client errors start earliest (r15), the trace shows a 502 from api.stripe.com on POST /v1/payment_intents (r18), the logs show provider failures and the retry budget running out (r17), errors spread to /charges and checkout (r12, r20, r4, r1), and step 2 is healthy (r7, r8)."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/error-burst-30s-3.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 34016,
+          "outputTokens": 3962
+        },
+        "judge": {
+          "inputTokens": 7201,
+          "outputTokens": 521
+        }
+      }
+    },
+    {
+      "case": "healthy-baseline",
+      "repeat": 1,
+      "status": "completed",
+      "exitCode": 3,
+      "outcome": "no-signal",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-09-43-540Z-93d659.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "n/a",
+        "cause": "n/a"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "Like the reference, the conclusion is no-signal and finds no faulty backend component; it mentions the uninstrumented browser only as a place to check, not as a cause."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "It says every indicator is within baseline and the SLO is met, and it correctly treats the one-request, 15 s pool blip as too small to explain an outage, so it invents no fault mechanism."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results show the KPI at baseline (r1), the p99 SLO met (r2), normal step throughput and latency (r3, r6, r11, r13), healthy payments logs and traces (r20, r21) and a tiny transient (r18, r23, r25, r30), which supports the no-fault conclusion."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/healthy-baseline-1.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 51887,
+          "outputTokens": 4194
+        },
+        "judge": {
+          "inputTokens": 13340,
+          "outputTokens": 493
+        }
+      }
+    },
+    {
+      "case": "healthy-baseline",
+      "repeat": 2,
+      "status": "completed",
+      "exitCode": 3,
+      "outcome": "no-signal",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-10-42-245Z-503f2d.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "n/a",
+        "cause": "n/a"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The conclusion is no-signal and blames no in-scope component; it treats the 15-second blip as noise rather than a fault."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "It says nothing is wrong in scope and only suggests the problem may lie outside the telemetry, which matches the reference's no-fault finding."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results show the KPI at baseline (r1), the p99 target met (r2), step traffic and latency normal (r3, r11, r13) and orders-pg healthy (r25), and r18, r19 and r24 show the blip was small and lasted 15 seconds."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/healthy-baseline-2.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 49275,
+          "outputTokens": 3831
+        },
+        "judge": {
+          "inputTokens": 10220,
+          "outputTokens": 412
+        }
+      }
+    },
+    {
+      "case": "healthy-baseline",
+      "repeat": 3,
+      "status": "completed",
+      "exitCode": 3,
+      "outcome": "no-signal",
+      "transcript": "/home/engineer/.heimdall/runs/2026-10-31T19-11-30-610Z-5dd9a6.json",
+      "error": null,
+      "checks": {
+        "outcome": "pass",
+        "origin": "n/a",
+        "cause": "n/a"
+      },
+      "scores": {
+        "component": {
+          "score": 2,
+          "reason": "The reference expects no signal, and the conclusion also reports no fault without blaming any component; it treats the brief bumps and the steady pool timeouts as transient or already present in the baseline hour."
+        },
+        "mechanism": {
+          "score": 2,
+          "reason": "Like the reference, it concludes that every indicator stays within its baseline and SLO, and it does not invent a cause."
+        },
+        "evidence": {
+          "score": 2,
+          "reason": "The cited results show the KPI as normal (r1), the place-order p99 SLO as met (r2), and normal errors and latency for each step (r3–r13), while r37 shows the same PoolTimeoutError count in the window and the baseline hour."
+        }
+      },
+      "judgeError": null,
+      "sheet": "/home/engineer/.heimdall/evals/2026-10-31T19-06-50-851Z/sheets/healthy-baseline-3.score.yaml",
+      "tokens": {
+        "agent": {
+          "inputTokens": 71432,
+          "outputTokens": 4532
+        },
+        "judge": {
+          "inputTokens": 16402,
+          "outputTokens": 425
+        }
+      }
+    }
+  ],
+  "summary": {
+    "runs": 6,
+    "completed": 6,
+    "checks": {
+      "passed": 12,
+      "total": 12
+    },
+    "meanScores": {
+      "component": 2,
+      "mechanism": 2,
+      "evidence": 2
+    },
+    "tokens": {
+      "inputTokens": 341607,
+      "outputTokens": 26992
+    }
+  }
+}

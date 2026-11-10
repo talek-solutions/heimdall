@@ -1,0 +1,57 @@
+{
+  "startedAt": "2026-10-29T20:04:27.429Z",
+  "output": "/home/engineer/.heimdall/evals/2026-10-29T20-04-27-429Z",
+  "judge": {
+    "model": "claude-opus-5-5",
+    "status": "uncalibrated"
+  },
+  "runs": [
+    {
+      "case": "healthy-baseline",
+      "repeat": 1,
+      "status": "failed",
+      "exitCode": 2,
+      "outcome": null,
+      "transcript": null,
+      "error": {
+        "errorCode": "INVESTIGATION_ENTRY_AMBIGUOUS",
+        "message": "the report fits several entries about equally: functionality:checkout (0.60), flow:place-order (0.50), component:checkout (0.30); name one as the entry (--entry)"
+      },
+      "checks": {
+        "outcome": "fail",
+        "origin": "n/a",
+        "cause": "n/a"
+      },
+      "scores": null,
+      "judgeError": null,
+      "sheet": null,
+      "tokens": {
+        "agent": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "judge": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "completed": 0,
+    "checks": {
+      "passed": 0,
+      "total": 1
+    },
+    "meanScores": {
+      "component": null,
+      "mechanism": null,
+      "evidence": null
+    },
+    "tokens": {
+      "inputTokens": 0,
+      "outputTokens": 0
+    }
+  }
+}

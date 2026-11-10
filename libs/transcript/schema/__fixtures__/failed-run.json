@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "meta": {
+    "heimdall": "0.0.0",
+    "recordedAt": "2026-10-29T20:04:27.669Z",
+    "command": {"query":"checkouts are not working","since":"60m","planOnly":false},
+    "manifest": {
+      "sha256": "d2f1d7b1df60d339d413a41f55b9b048c8498fe39aba150586c1562c4b3733af",
+      "content": "# Reference system manifest shaped after the telemetry fixture scenarios in\n# libs/telemetry/scenarios (error-burst-30s, increased-latency-1, healthy-baseline): the\n# same services, metric names and labels, so an investigation can run end to end against\n# fixtures. See README.md in this folder.\napiVersion: heimdall/v1\nkind: System\nmetadata: { name: storefront }\nspec:\n  description: Web checkout with stock reservation and card payments\n  environments:\n    - name: prod\n      context: prod\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: web, system: storefront }\nspec:\n  type: frontend\n  description: The storefront in the browser; emits no telemetry of its own\n  dependsOn:\n    - name: checkout-api\n      target: checkout\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /api/checkout']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: checkout, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /api/checkout }\n  telemetry:\n    # Mapped fields are the only ones that reach the model (ADR 0008): dsn, customer and\n    # authorization stay unmapped on purpose.\n    logs:\n      selector: '{service_name=\"checkout\"}'\n      fields: { level: severity, msg: message, trace_id: traceId, order_id: orderId, error: error, operation: operation, table: table, duration_ms: durationMs, pool: pool }\n    metrics: { matchers: { service: checkout } }\n    traces: { serviceName: checkout }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: db_client_operation_duration_seconds, type: histogram, unit: seconds, measures: { outbound: orders-db }, labels: { db_operation_name: operation, db_collection_name: table } }\n    - { name: db_client_connections_usage, type: gauge, role: saturation, description: Connections in use in the orders-pg pool }\n    - { name: db_client_connections_pending_requests, type: gauge, role: saturation, description: Requests waiting for an orders-pg connection }\n  dependsOn:\n    - name: reserve-stock\n      target: inventory\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /reserve']\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n      config: { poolSize: 50 }\n    - name: charge\n      target: payments\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /charges']\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payments, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /charges }\n  telemetry:\n    logs: { selector: '{service_name=\"payments\"}', fields: { level: severity, msg: message, trace_id: traceId, payment_id: paymentId } }\n    metrics: { matchers: { service: payments } }\n    traces: { serviceName: payments }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n    - { name: http_client_request_duration_seconds, type: histogram, unit: seconds, measures: { outbound: provider }, labels: { http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: provider\n      target: payment-provider\n      transport: http\n      mode: sync\n      criticality: hard\n      operations: ['POST /v1/payment_intents']\n      config: { maxAttempts: 3 }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: inventory, system: storefront }\nspec:\n  type: service\n  exposes:\n    - { transport: http, route: /reserve }\n  telemetry:\n    logs: { selector: '{service_name=\"inventory\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { service: inventory } }\n    traces: { serviceName: inventory }\n  metrics:\n    - { name: http_server_request_duration_seconds, type: histogram, unit: seconds, measures: { inbound: http }, labels: { http_route: route, http_request_method: method, http_response_status_code: statusCode } }\n  dependsOn:\n    - name: stock-cache\n      target: stock-cache\n      transport: redis\n      mode: sync\n      criticality: soft\n      role: cache-aside\n      operations: [GET]\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: stock-cache, system: storefront }\nspec:\n  type: cache\n  engine: redis\n  description: Stock levels cached in front of inventory's own database\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: payment-provider, system: storefront }\nspec:\n  type: vendor\n  description: External card processor at api.stripe.com; observed only through payments' client metrics\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-pg, system: storefront }\nspec:\n  type: datastore\n  engine: postgresql\n  telemetry:\n    logs: { selector: '{service_name=\"orders-pg\"}', fields: { level: severity, msg: message } }\n    metrics: { matchers: { datname: orders } }\n  dataModel:\n    - { kind: table, name: orders }\n  metrics:\n    - { name: pg_stat_activity_count, type: gauge, role: saturation }\n    - { name: pg_locks_count, type: gauge, role: saturation }\n    - { name: pg_stat_activity_max_tx_duration, type: gauge, unit: seconds }\n  indicators:\n    - { metric: pg_stat_activity_max_tx_duration, role: saturation, expect: { kind: threshold, max: 30 } }\n---\napiVersion: heimdall/v1\nkind: Component\nmetadata: { name: orders-reconcile, system: storefront }\nspec:\n  type: worker\n  description: Periodic batch job reconciling orders against payments\n  telemetry:\n    logs: { selector: '{service_name=\"orders-reconcile\"}', fields: { level: severity, msg: message, table: table, isolation: isolation, tx_open_seconds: txOpenSeconds } }\n  dependsOn:\n    - name: orders-db\n      target: orders-pg\n      transport: sql\n      mode: sync\n      criticality: hard\n      operations: [UPDATE, SELECT]\n---\napiVersion: heimdall/v1\nkind: Functionality\nmetadata: { name: checkout, system: storefront }\nspec:\n  description: Customers pay for their cart and an order is placed\n  flows: [place-order]\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: kpi, expect: { kind: baseline }, description: Checkout requests served }\n---\napiVersion: heimdall/v1\nkind: Flow\nmetadata: { name: place-order, system: storefront }\nspec:\n  description: The browser submits the cart; checkout reserves stock, records the order and charges the card\n  mode: sync\n  steps:\n    - { dependency: web/checkout-api, match: { route: /api/checkout, method: POST } }\n    - { dependency: checkout/reserve-stock, match: { route: /reserve, method: POST } }\n    - { dependency: checkout/orders-db, match: { operation: UPDATE, table: orders } }\n    - { dependency: checkout/charge, match: { route: /charges, method: POST } }\n    - { dependency: payments/provider, match: { method: POST } }\n  indicators:\n    - { metric: checkout/http_server_request_duration_seconds, role: latency, expect: { kind: slo, p99: 1 } }\n"
+    },
+    "datasources": {
+      "datasources": {"prometheus":"fixture","loki":"fixture","tempo":"fixture"},
+      "fixture": {"scenario":"healthy-baseline","anchor":"2026-10-17T08:00:00.000Z"}
+    }
+  },
+  "environment": {
+    "variables": {
+      "LOKI_DATASOURCE_TYPE": "fixture",
+      "PROMETHEUS_DATASOURCE_TYPE": "fixture",
+      "TELEMETRY_FIXTURE_ANCHOR": "2026-10-17T08:00:00.000Z",
+      "TELEMETRY_FIXTURE_SCENARIO": "healthy-baseline",
+      "TEMPO_DATASOURCE_TYPE": "fixture"
+    }
+  },
+  "pins": {"now":{"value":"2026-10-17T08:00:00.000Z"}},
+  "model": [
+    {
+      "call": 1,
+      "request": {
+        "model": "claude-opus-5",
+        "system": "You locate the part of a software system that an incident report is about.\n\nYou receive the system's index: one line per functionality, flow, component and member, each starting with its id, followed by what it is and what it depends on. You also receive an engineer's report, in their own words.\n\nAnswer only by calling select_entry once.\n\ncandidates: ids from the index that the report is most likely about, best first, each with a confidence between 0 and 1 and a one-sentence reason. Prefer a functionality or flow when the report describes what users experience, and a component or member when it names infrastructure. Give a lower confidence when the report could mean several parts. Return no candidates when nothing in the index fits.\n\nsymptomRoles: the kinds of signal that would show the reported problem. errors: requests fail. throughput: traffic drops or stops. latency: things are slow or time out. saturation: a resource such as a pool, CPU or memory is exhausted. lag: queues, consumers or replicas fall behind. kpi: a business outcome moves.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Index:\nsystem storefront · env prod — Web checkout with stock reservation and card payments\nfunctionality:checkout — Customers pay for their cart and an order is placed | kpi checkout/http_server_request_duration_seconds ~baseline\n  flow:place-order  sync: web/checkout-api POST /api/checkout ▸ checkout/reserve-stock POST /reserve ▸ checkout/orders-db UPDATE orders ▸ checkout/charge POST /charges ▸ payments/provider POST — The browser submits the cart; checkout reserves stock, records the order and charges the card\ncomponent:web  frontend — The storefront in the browser; emits no telemetry of its own → checkout http sync hard\ncomponent:checkout  service → inventory http sync hard · orders-pg sql sync hard · payments http sync hard\ncomponent:payments  service → payment-provider http sync hard\ncomponent:inventory  service → stock-cache redis sync soft\ncomponent:stock-cache  cache redis — Stock levels cached in front of inventory's own database\ncomponent:payment-provider  vendor — External card processor at api.stripe.com; observed only through payments' client metrics\ncomponent:orders-pg  datastore postgresql\ncomponent:orders-reconcile  worker — Periodic batch job reconciling orders against payments → orders-pg sql sync hard\nnot on any flow: dependency:inventory/stock-cache, dependency:orders-reconcile/orders-db\n\nReport: checkouts are not working"
+          }
+        ],
+        "tools": [
+          {
+            "name": "select_entry",
+            "description": "Report which parts of the system the incident report is about, and how the problem would show.",
+            "strict": true,
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "candidates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "vertexId": {
+                        "type": "string",
+                        "enum": [
+                          "functionality:checkout",
+                          "flow:place-order",
+                          "component:web",
+                          "component:checkout",
+                          "component:payments",
+                          "component:inventory",
+                          "component:stock-cache",
+                          "component:payment-provider",
+                          "component:orders-pg",
+                          "component:orders-reconcile"
+                        ]
+                      },
+                      "confidence": {"type":"number","description":"Between 0 and 1."},
+                      "reason": {"type":"string"}
+                    },
+                    "required": ["vertexId","confidence","reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "symptomRoles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["throughput","errors","latency","saturation","lag","kpi"]
+                  }
+                }
+              },
+              "required": ["candidates","symptomRoles"],
+              "additionalProperties": false
+            }
+          }
+        ],
+        "toolChoice": {"type":"auto"},
+        "reasoning": {"effort":"low"},
+        "maxTokens": 4096
+      },
+      "response": {
+        "id": "msg_011CgX8NwyKW1rET2wneMbLA",
+        "model": "claude-opus-5",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "toolu_01AGSsD9wRuwSvtcgqpiaZDf",
+            "name": "select_entry",
+            "input": {
+              "candidates": [
+                {
+                  "vertexId": "functionality:checkout",
+                  "confidence": 0.6,
+                  "reason": "Report is a vague user-facing statement that checkout doesn't work."
+                },
+                {
+                  "vertexId": "flow:place-order",
+                  "confidence": 0.5,
+                  "reason": "The concrete request path that would fail when checkouts break."
+                },
+                {
+                  "vertexId": "component:checkout",
+                  "confidence": 0.3,
+                  "reason": "The service owning checkout could be the failing component."
+                }
+              ],
+              "symptomRoles": ["errors","throughput","latency","kpi"]
+            }
+          }
+        ],
+        "finishReason": "tool_calls",
+        "usage": {"inputTokens":1449,"outputTokens":232,"cachedInputTokens":0}
+      }
+    }
+  ],
+  "telemetry": [],
+  "outcome": {
+    "events": [
+      {
+        "type": "investigation.started",
+        "query": "checkouts are not working",
+        "system": "storefront",
+        "environment": {"name":"prod","context":"prod"},
+        "window": {
+          "start": "2026-10-17T07:00:00.000Z",
+          "end": "2026-10-17T08:00:00.000Z",
+          "baseline": {"start":"2026-10-17T06:00:00.000Z","end":"2026-10-17T07:00:00.000Z"}
+        }
+      }
+    ],
+    "error": {
+      "errorCode": "INVESTIGATION_ENTRY_AMBIGUOUS",
+      "message": "the report fits several entries about equally: functionality:checkout (0.60), flow:place-order (0.50), component:checkout (0.30); name one as the entry (--entry)"
+    }
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heimdall:schema:scorecard:v1",
+  "title": "Heimdall eval scorecard, version 1",
+  "description": "One `heimdall eval`: `~/.heimdall/evals/<time>/scorecard.json` (ADR 0019). Describes the file as written. Objects allow unknown properties. A file without `version` is version 1.",
+  "type": "object",
+  "properties": {
+    "version": { "const": 1 },
+    "heimdall": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "commit": {
+          "description": "The commit of the Heimdall checkout; null outside one.",
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "dirty": { "type": "boolean" }
+      },
+      "required": ["version", "commit"]
+    },
+    "startedAt": { "type": "string" },
+    "output": { "description": "Where the scorecard and the scoring sheets were written.", "type": "string" },
+    "judge": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "status": { "enum": ["calibrated", "uncalibrated"] },
+        "lock": { "$ref": "#/$defs/lock" }
+      },
+      "required": ["model", "status"]
+    },
+    "runs": { "type": "array", "items": { "$ref": "#/$defs/run" } },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "runs": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "checks": {
+          "type": "object",
+          "properties": { "passed": { "type": "integer", "minimum": 0 }, "total": { "type": "integer", "minimum": 0 } },
+          "required": ["passed", "total"]
+        },
+        "meanScores": {
+          "description": "null when nothing was judged.",
+          "type": "object",
+          "properties": {
+            "component": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+            "mechanism": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+            "evidence": { "anyOf": [{ "type": "number" }, { "type": "null" }] }
+          },
+          "required": ["component", "mechanism", "evidence"]
+        },
+        "tokens": { "$ref": "#/$defs/tokens" }
+      },
+      "required": ["runs", "completed", "checks", "meanScores", "tokens"]
+    }
+  },
+  "required": ["startedAt", "output", "judge", "runs", "summary"],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "properties": { "errorCode": { "type": "string" }, "message": { "type": "string" } },
+      "required": ["errorCode"]
+    },
+    "tokens": {
+      "type": "object",
+      "properties": { "inputTokens": { "type": "integer", "minimum": 0 }, "outputTokens": { "type": "integer", "minimum": 0 } },
+      "required": ["inputTokens", "outputTokens"]
+    },
+    "lock": {
+      "description": "The calibration the judge was trusted on, as `judge.lock.json` held it when the eval ran.",
+      "type": "object",
+      "properties": {
+        "judgeModel": { "type": "string" },
+        "calibratedAt": { "type": "string" },
+        "sheets": { "type": "integer", "minimum": 0 },
+        "agreement": {
+          "type": "object",
+          "properties": { "component": { "type": "number" }, "mechanism": { "type": "number" }, "evidence": { "type": "number" } },
+          "required": ["component", "mechanism", "evidence"]
+        },
+        "maxDeviation": {
+          "type": "object",
+          "properties": { "component": { "type": "number" }, "mechanism": { "type": "number" }, "evidence": { "type": "number" } },
+          "required": ["component", "mechanism", "evidence"]
+        },
+        "passed": { "type": "boolean" }
+      },
+      "required": ["judgeModel", "calibratedAt", "sheets", "agreement", "maxDeviation", "passed"]
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "case": { "type": "string" },
+        "repeat": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["completed", "failed"] },
+        "exitCode": { "type": "integer" },
+        "outcome": { "anyOf": [{ "enum": ["cause-found", "no-signal", "inconclusive"] }, { "type": "null" }] },
+        "transcript": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "error": { "anyOf": [{ "$ref": "#/$defs/error" }, { "type": "null" }] },
+        "checks": {
+          "type": "object",
+          "properties": {
+            "outcome": { "enum": ["pass", "fail", "n/a"] },
+            "origin": { "enum": ["pass", "fail", "n/a"] },
+            "cause": { "enum": ["pass", "fail", "n/a"] }
+          },
+          "required": ["outcome", "origin", "cause"]
+        },
+        "scores": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "component": {
+                  "type": "object",
+                  "properties": { "score": { "type": "integer", "minimum": 0, "maximum": 2 }, "reason": { "type": "string" } },
+                  "required": ["score", "reason"]
+                },
+                "mechanism": {
+                  "type": "object",
+                  "properties": { "score": { "type": "integer", "minimum": 0, "maximum": 2 }, "reason": { "type": "string" } },
+                  "required": ["score", "reason"]
+                },
+                "evidence": {
+                  "type": "object",
+                  "properties": { "score": { "type": "integer", "minimum": 0, "maximum": 2 }, "reason": { "type": "string" } },
+                  "required": ["score", "reason"]
+                }
+              },
+              "required": ["component", "mechanism", "evidence"]
+            },
+            { "type": "null" }
+          ]
+        },
+        "judgeError": { "anyOf": [{ "$ref": "#/$defs/error" }, { "type": "null" }] },
+        "sheet": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "tokens": {
+          "description": "Every model call the run made is under `investigation`; sessions before 2026-11-01 wrote it as `agent`.",
+          "type": "object",
+          "properties": {
+            "investigation": { "$ref": "#/$defs/tokens" },
+            "agent": { "$ref": "#/$defs/tokens" },
+            "judge": { "$ref": "#/$defs/tokens" }
+          },
+          "required": ["judge"],
+          "oneOf": [{ "required": ["investigation"] }, { "required": ["agent"] }]
+        }
+      },
+      "required": [
+        "case",
+        "repeat",
+        "status",
+        "exitCode",
+        "outcome",
+        "transcript",
+        "error",
+        "checks",
+        "scores",
+        "judgeError",
+        "sheet",
+        "tokens"
+      ]
+    }
+  }
+}
