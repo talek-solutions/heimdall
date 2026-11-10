@@ -20,12 +20,12 @@ its row in the index below.
 | [0004](0004-single-llm-adapter-behind-a-port.md) | LLM port with a single Anthropic adapter | Accepted |
 | [0005](0005-native-queries-in-declarative-config.md) | Telemetry config carries native queries | Superseded by 0015 |
 | [0006](0006-cli-output-contract.md) | CLI output contract | Accepted |
-| [0007](0007-record-replay-and-golden-evals.md) | Eval strategy: replay + judged golden set | Accepted |
+| [0007](0007-record-replay-and-golden-evals.md) | Eval strategy: replay plus a judged golden set | Accepted |
 | [0008](0008-egress-allowlist-and-scrub.md) | Egress: allowlist plus scrubbing | Accepted |
 | [0009](0009-grafana-stack-first.md) | Grafana stack as the first backend | Accepted |
 | [0010](0010-no-tui-in-scope.md) | No terminal UI in scope | Accepted |
-| [0011](0011-commonjs-and-npm-workspaces.md) | CommonJS output and npm workspaces | Accepted |
-| [0012](0012-no-eslint-until-typescript-eslint-supports-ts7.md) | Stream discipline enforced by a guard test | Accepted |
+| [0011](0011-commonjs-and-npm-workspaces.md) | CommonJS output and npm workspaces for module resolution | Accepted |
+| [0012](0012-no-eslint-until-typescript-eslint-supports-ts7.md) | Stream discipline enforced by a guard test, not ESLint | Accepted |
 | [0013](0013-user-level-kubeconfig-style-config.md) | User-level, kubeconfig-style configuration | Accepted |
 | [0014](0014-fixture-datasources.md) | Fixture datasources behind the connectors' fetch | Accepted |
 | [0015](0015-system-manifest-as-a-traversable-graph.md) | System manifest as a traversable graph | Accepted |
@@ -33,3 +33,6 @@ its row in the index below.
 | [0017](0017-agent-runtime-loop-tools-budgets-tracing.md) | Agent runtime: loop, tools, budgets and tracing | Accepted |
 | [0018](0018-investigation-execution-on-the-agent-runtime.md) | Investigation execution on the agent runtime | Accepted |
 | [0019](0019-published-schemas-for-transcripts-and-scorecards.md) | Published schemas for transcripts and scorecards | Accepted |
+| [0020](0020-a-recorded-source-call-names-the-results-it-served.md) | A recorded source call names the results it served | Accepted |
+| [0021](0021-schemas-are-identified-and-referenced-by-urn.md) | Schemas are identified and referenced by URN | Accepted |
+| [0022](0022-the-commit-comes-from-where-the-code-runs-with-a-dirty-flag.md) | The commit comes from where the code runs, with a dirty flag | Accepted |
