@@ -8,32 +8,16 @@ A story says **what** and **why**. **How** lives in the ADRs each item links to.
 
 ## Template
 
-```markdown
-# US-NNN. Short title
-
-- **Priority:** High | Medium | Low
-- **Persona:** who asks for it
-
-## Story
-As a …, I want … so that …
-
-## Items
-| # | The user can… | Status | Where |
-|---|---|---|---|
-
-## Notes
-Scope decisions, open questions.
-```
+The template is bifrost's
+[`process/templates/user-story.md`](../../../bifrost/process/templates/user-story.md), the same in
+every repo of the family. `bifrost new us "<title>"` starts one from it, with the next number and
+its row in the index below.
 
 ## Status
 
-| Status | Meaning |
-|---|---|
-| `done` | Shipped and covered by tests |
-| `in progress` | Being built now |
-| `planned` | Designed, with an ADR, not yet built |
-| `seam` | An extension point is designed in; the capability itself is not planned yet |
-| `not started` | Neither designed nor built |
+The statuses and what they mean are bifrost's
+[`process/statuses.md`](../../../bifrost/process/statuses.md#items), the same in every repo of the
+family.
 
 ## Index
 

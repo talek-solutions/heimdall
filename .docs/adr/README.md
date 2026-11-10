@@ -6,24 +6,9 @@ looked correct at the time is the most valuable thing in here.
 
 ## Template
 
-```markdown
-# NNNN. Short title
-
-- **Status:** Proposed | Accepted | Superseded by NNNN
-- **Date:** YYYY-MM-DD
-
-## Context
-What forced this decision. The constraint, not the solution.
-
-## Options considered
-Each option with its honest cost — including the one we chose.
-
-## Decision
-What we chose.
-
-## Consequences
-What this makes easy. What this makes hard. What we will regret if assumptions change.
-```
+The template is bifrost's [`process/templates/adr.md`](../../../bifrost/process/templates/adr.md), the same in
+every repo of the family. `bifrost new adr "<title>"` starts one from it, with the next number and
+its row in the index below.
 
 ## Index
 

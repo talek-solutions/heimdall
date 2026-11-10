@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "heimdall-family": {
+      "source": { "source": "directory", "path": "../bifrost" }
+    }
+  },
+  "enabledPlugins": {
+    "bifrost@heimdall-family": true
+  }
+}

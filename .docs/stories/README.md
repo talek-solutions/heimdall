@@ -11,27 +11,11 @@ and every item carries its own status.
 
 ## Template
 
-```markdown
-# NNNN-NN. Short title
-
-- **Priority:** High | Medium | Low
-- **Persona:** who benefits
-- **Advances:** [US-NNN](…) item N
-- **Decided in:** [ADR NNNN](…)
-
-## Story
-As a …, I want … so that …
-
-## Items
-| # | It can… | Status |
-|---|---|---|
-
-## Acceptance
-- Checkable statements, each naming the test or command that proves it.
-
-## Notes
-Scope decisions, open questions.
-```
+The template is bifrost's
+[`process/templates/delivery-story.md`](../../../bifrost/process/templates/delivery-story.md), the
+same in every repo of the family.
+`bifrost new ds "<title>" --folder <folder> --advances US-NNN#n --decided-in ADR-NNNN` starts one
+from it, with the next number and its row in the index below.
 
 Statuses are those of the product stories: `done`, `in progress`, `planned`, `seam`,
 `not started` ([meanings](../user-stories/README.md#status)).
