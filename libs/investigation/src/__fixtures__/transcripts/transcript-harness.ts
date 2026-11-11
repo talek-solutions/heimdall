@@ -32,6 +32,8 @@ import { corroborator, investigator, RuleBasedModel, type Brain } from '../scrip
 import type { IInvestigationPlan } from '../../interfaces';
 
 export const TRANSCRIPT_ANCHOR = '2026-10-17T08:00:00.000Z';
+/** What a committed transcript carries in place of its run's random id. */
+export const TRANSCRIPT_RUN_ID = '00000000-0000-4000-8000-000000000000';
 const HEIMDALL = 'scripted';
 const HTTP_BACKENDS = {
   [TelemetryEnvVariable.PrometheusDatasourceType]: 'http',
@@ -220,6 +222,9 @@ async function run({
 
     session.begin({
       heimdall: HEIMDALL,
+      // A committed transcript must not change with every commit.
+      commit: null,
+      dirty: false,
       command,
       manifest: manifestText,
       datasources: moduleRef.get(TELEMETRY_DATASOURCE_CONFIG),
@@ -261,13 +266,13 @@ async function run({
   }
 }
 
-/** The two values that vary between recordings of the same run; replay ignores both. */
+/** The values that vary between recordings of the same run; replay ignores them all. */
 function stableForCommit(transcript: ITranscript): ITranscript {
   const report = transcript.outcome.report as { usage?: Record<string, unknown> } | undefined;
 
   return {
     ...transcript,
-    meta: { ...transcript.meta, recordedAt: TRANSCRIPT_ANCHOR },
+    meta: { ...transcript.meta, recordedAt: TRANSCRIPT_ANCHOR, runId: TRANSCRIPT_RUN_ID },
     outcome: {
       ...transcript.outcome,
       ...(report?.usage === undefined

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { isHeimdallError, type ErrorResponse } from '@heimdall/core';
 import {
@@ -33,6 +33,9 @@ import { TRANSCRIPT_CONFIG } from '../transcript.tokens';
 
 export interface ITranscriptBegin {
   readonly heimdall: string;
+  /** The commit of the Heimdall checkout; `null` outside one. */
+  readonly commit: string | null;
+  readonly dirty: boolean;
   readonly command: ITranscriptCommand;
   readonly manifest: string;
   readonly datasources: unknown;
@@ -118,6 +121,10 @@ export class TranscriptSession implements ILLMCallInterceptor, ITelemetrySourceI
           content: input.manifest,
         },
         datasources: snapshot(input.datasources),
+        // A replay is a run of its own: it never takes the recording's id.
+        runId: randomUUID(),
+        commit: input.commit,
+        ...(input.dirty ? { dirty: true as const } : {}),
       },
       environment: { variables: recordedVariables(input.env) },
     };

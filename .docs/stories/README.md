@@ -44,5 +44,5 @@ Statuses are those of the product stories: `done`, `in progress`, `planned`, `se
 | # | Title | Status |
 |---|---|---|
 | [0019-01](0019-published-schemas/01-schemas-and-the-pinning-spec.md) | Schemas and the pinning spec | done |
-| [0019-02](0019-published-schemas/02-run-identity-and-atomic-writes.md) | Run identity and atomic writes | planned |
+| [0019-02](0019-published-schemas/02-run-identity-and-atomic-writes.md) | Run identity and atomic writes | done |
 | [0019-03](0019-published-schemas/03-source-call-linked-to-its-result.md) | Source call linked to its result | planned |

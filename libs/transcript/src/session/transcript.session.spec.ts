@@ -17,8 +17,11 @@ import { TranscriptMode, TranscriptPin } from '../transcript.enums';
 import { TranscriptSession } from './transcript.session';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'heimdall-session-'));
+const COMMIT = '2e3ef8e0c1d2b3a4f5e6d7c8b9a0f1e2d3c4b5a6';
 const BEGIN = {
   heimdall: '0.0.0',
+  commit: COMMIT,
+  dirty: false,
   command: { query: 'checkouts are not working', planOnly: false },
   manifest: 'apiVersion: heimdall/v1',
   datasources: {},
@@ -93,6 +96,31 @@ describe('TranscriptSession', () => {
       message: 'slow down',
     });
     assert.deepEqual(transcript.environment.variables, { INVESTIGATION_MAX_TURNS: '8' });
+  });
+
+  it('names the run and the code that made it, and a replay is a run of its own (ADR 0019, ADR 0022)', async () => {
+    const { session, store } = recorder('identity');
+
+    session.begin({ ...BEGIN, dirty: true });
+    const { path: file = '' } = session.finish({});
+    const recorded = store.read(file);
+    const clean = recorder('identity-clean');
+    const outside = recorder('identity-outside');
+
+    clean.session.begin(BEGIN);
+    outside.session.begin({ ...BEGIN, commit: null });
+    const replay = replayer(file);
+
+    replay.begin(BEGIN);
+    const replayed = store.read(replay.finish({}).path ?? '');
+
+    assert.match(recorded.meta.runId ?? '', /^[0-9a-f-]{36}$/);
+    assert.equal(recorded.meta.commit, COMMIT);
+    assert.equal(recorded.meta.dirty, true);
+    assert.equal('dirty' in clean.store.read(clean.session.finish({}).path ?? '').meta, false);
+    assert.equal(outside.store.read(outside.session.finish({}).path ?? '').meta.commit, null);
+    assert.match(replayed.meta.runId ?? '', /^[0-9a-f-]{36}$/);
+    assert.notEqual(replayed.meta.runId, recorded.meta.runId);
   });
 
   it('pins a value, or the error computing it raised, and replays either', async () => {

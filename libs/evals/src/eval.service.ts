@@ -1,13 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
+import { writeFileAtomic, type IBuildIdentity } from '@heimdall/core';
 import { decodeTranscript } from '@heimdall/transcript';
 import { Calibrator } from './calibration/calibrator';
 import type { IGoldenCase } from './cases/golden-case.interface';
 import { GoldenCaseLoader } from './cases/golden-case.loader';
 import type { IEvalsConfig } from './config/evals-config.model';
 import { PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from './evals.constants';
-import { CheckResult, EvalRunStatus, JudgeDimension } from './evals.enums';
+import { CheckResult, EvalFileVersion, EvalRunStatus, JudgeDimension } from './evals.enums';
 import { EVALS_CONFIG } from './evals.tokens';
 import { CaseRunner, type ICaseRun, type Spawn } from './run/case.runner';
 import { checkRun } from './score/checks';
@@ -23,6 +24,8 @@ export interface IEvalOptions {
   readonly cases: readonly string[];
   readonly repeat: number;
   readonly spawn: Spawn;
+  /** The Heimdall running the eval, as resolved at start (ADR 0022). */
+  readonly heimdall: IBuildIdentity;
   readonly onRun?: ((run: IEvalRun) => void) | undefined;
 }
 
@@ -61,7 +64,10 @@ export class EvalService {
         options.onRun?.(run);
       }
     }
+    const { version, commit, dirty } = options.heimdall;
     const scorecard: IScorecard = {
+      version: EvalFileVersion.V1,
+      heimdall: { version, commit, ...(dirty ? { dirty: true as const } : {}) },
       startedAt,
       output,
       judge: { model: this.config.judgeModel, ...this.calibrator.state() },
@@ -69,7 +75,7 @@ export class EvalService {
       summary: summarise(runs),
     };
 
-    writeFileSync(path.join(output, SCORECARD_FILE), `${JSON.stringify(scorecard, null, 2)}\n`, {
+    writeFileAtomic(path.join(output, SCORECARD_FILE), `${JSON.stringify(scorecard, null, 2)}\n`, {
       mode: PRIVATE_FILE_MODE,
     });
     return scorecard;
@@ -90,6 +96,7 @@ export class EvalService {
       input === undefined
         ? null
         : this.calibrator.writeSheet(path.join(output, SHEETS_DIRNAME), name, {
+            version: EvalFileVersion.V1,
             case: golden.name,
             run: run.transcript ?? `${golden.name} #${repeat}`,
             judgeInput: input,

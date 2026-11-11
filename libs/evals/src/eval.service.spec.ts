@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -14,11 +15,19 @@ import { after, describe, it } from 'node:test';
 import { parse } from 'yaml';
 import { TranscriptEnvVariable } from '@heimdall/transcript';
 import { evalsModule, scoreCall, ScriptedJudge } from './__fixtures__/evals.fixture';
-import { CalibrationStatus, CheckResult, EvalCheck, EvalRunStatus } from './evals.enums';
+import {
+  CalibrationStatus,
+  CheckResult,
+  EvalCheck,
+  EvalFileVersion,
+  EvalRunStatus,
+} from './evals.enums';
 import { EvalService } from './eval.service';
 import type { Spawn } from './run/case.runner';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'heimdall-eval-'));
+const COMMIT = '2e3ef8e0c1d2b3a4f5e6d7c8b9a0f1e2d3c4b5a6';
+const HEIMDALL = { version: '0.0.0', commit: COMMIT, dirty: false };
 const GOLDEN = path.resolve(__dirname, '..', 'golden');
 
 /** What the triage call of a real run spent; the committed transcript skipped triage (--entry). */
@@ -101,7 +110,7 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
       calls.push({ args, env });
       return { status: 0, stdout: `${recordedReport()}\n`, stderr: '' };
     };
-    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 2, spawn });
+    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 2, spawn, heimdall: HEIMDALL });
     const [first] = scorecard.runs;
     const sheet = parse(readFileSync(first?.sheet ?? '', 'utf8')) as {
       human: Record<string, unknown>;
@@ -132,6 +141,34 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
     assert.equal(judge.requests.length, 2);
   });
 
+  it('writes the scorecard and each sheet whole, with their version and the Heimdall that ran (ADR 0019, ADR 0022)', async () => {
+    const { evals } = await service();
+    const spawn: Spawn = () => ({ status: 0, stdout: `${recordedReport()}\n`, stderr: '' });
+    const scorecard = await evals.run({
+      cases: ['error-burst-30s'],
+      repeat: 1,
+      spawn,
+      heimdall: { ...HEIMDALL, dirty: true },
+    });
+    const clean = await evals.run({ cases: ['error-burst-30s'], repeat: 1, spawn, heimdall: HEIMDALL });
+    const written = JSON.parse(
+      readFileSync(path.join(scorecard.output, 'scorecard.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    const sheet = parse(readFileSync(scorecard.runs[0]?.sheet ?? '', 'utf8')) as {
+      version: number;
+    };
+    const left = [scorecard.output, path.join(scorecard.output, 'sheets')].flatMap((directory) =>
+      readdirSync(directory).filter((name) => name.endsWith('.tmp')),
+    );
+
+    assert.equal(written['version'], EvalFileVersion.V1);
+    assert.deepEqual(written['heimdall'], { version: '0.0.0', commit: COMMIT, dirty: true });
+    assert.deepEqual(clean.heimdall, { version: '0.0.0', commit: COMMIT });
+    assert.equal(sheet.version, EvalFileVersion.V1);
+    assert.deepEqual(left, []);
+    assert.equal(modeOf(path.join(scorecard.output, 'scorecard.json')), 0o600);
+  });
+
   it('records a run that ended in error, and does not ask the judge about it', async () => {
     const { evals, judge } = await service();
     const spawn: Spawn = () => ({
@@ -139,7 +176,7 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
       stdout: '{"errorCode":"LLM_MISSING_API_KEY","message":"no key"}\n',
       stderr: '',
     });
-    const scorecard = await evals.run({ cases: ['healthy-baseline'], repeat: 1, spawn });
+    const scorecard = await evals.run({ cases: ['healthy-baseline'], repeat: 1, spawn, heimdall: HEIMDALL });
 
     assert.equal(scorecard.runs[0]?.status, EvalRunStatus.Failed);
     assert.equal(scorecard.runs[0]?.error?.errorCode, 'LLM_MISSING_API_KEY');
@@ -154,7 +191,7 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
       envs.push(env);
       return { status: 0, stdout: `${recordedReport(record(env))}\n`, stderr: '' };
     };
-    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 1, spawn });
+    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 1, spawn, heimdall: HEIMDALL });
     const { usage } = committedTranscript().outcome.report;
 
     assert.equal(
@@ -172,13 +209,15 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
     let file = '';
     const spawn: Spawn = (_args, env) => {
       file = record(env);
+      // What a crash mid-write leaves: it sorts after the transcript, and is not one.
+      writeFileSync(path.join(path.dirname(file), '.2026-10-31T19-07-00-000Z-ffffff.json.0a1b2c.tmp'), '{');
       return {
         status: 2,
         stdout: '{"errorCode":"INVESTIGATION_ENTRY_AMBIGUOUS","message":"several fit"}\n',
         stderr: '',
       };
     };
-    const scorecard = await evals.run({ cases: ['healthy-baseline'], repeat: 1, spawn });
+    const scorecard = await evals.run({ cases: ['healthy-baseline'], repeat: 1, spawn, heimdall: HEIMDALL });
 
     assert.equal(scorecard.runs[0]?.status, EvalRunStatus.Failed);
     assert.equal(scorecard.runs[0]?.transcript, file);
@@ -188,7 +227,7 @@ describe('EvalService (replay-and-evals.md, Golden cases)', () => {
   it('keeps the scorecard and the sheets readable by the owner alone', async () => {
     const { evals } = await service();
     const spawn: Spawn = () => ({ status: 0, stdout: `${recordedReport()}\n`, stderr: '' });
-    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 1, spawn });
+    const scorecard = await evals.run({ cases: ['error-burst-30s'], repeat: 1, spawn, heimdall: HEIMDALL });
 
     assert.equal(modeOf(scorecard.output), 0o700);
     assert.equal(modeOf(path.join(scorecard.output, 'sheets')), 0o700);

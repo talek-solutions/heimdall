@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -14,7 +14,9 @@ import {
 import {
   CI_CASES,
   readTranscript,
+  recordScripted,
   replayInProcess,
+  TRANSCRIPT_RUN_ID,
   transcriptsDir,
 } from '../__fixtures__/transcripts/transcript-harness';
 
@@ -48,6 +50,31 @@ describe('Replaying the committed CI transcripts (replay-and-evals.md, Replay)',
       assert.ok(diff.telemetry.compared > 0);
     });
   }
+
+  for (const scripted of CI_CASES) {
+    it(`${scripted.name} records to the committed bytes, every time`, async () => {
+      const committed = readFileSync(join(transcriptsDir(), `${scripted.name}.json`), 'utf8');
+      const first = await recordScripted(scripted);
+      const second = await recordScripted(scripted);
+
+      assert.equal(encodeTranscript(first), committed);
+      assert.equal(encodeTranscript(second), committed);
+      assert.equal(first.meta.runId, TRANSCRIPT_RUN_ID);
+      assert.equal(first.meta.commit, null);
+      assert.equal('dirty' in first.meta, false);
+    });
+  }
+
+  it('gives a replay a run id of its own, and still matches the recording', async () => {
+    const replayed = await replayInProcess(SMALLEST);
+
+    assert.match(replayed.meta.runId ?? '', /^[0-9a-f-]{36}$/);
+    assert.notEqual(replayed.meta.runId, TRANSCRIPT_RUN_ID);
+    assert.equal(
+      compareTranscripts(readTranscript(SMALLEST), replayed, { strict: true }).outcome,
+      ReplayOutcome.Matched,
+    );
+  });
 
   it('reports a changed prompt without failing, and fails on it only when strict', async () => {
     const { file, transcript } = edited((recorded) => ({

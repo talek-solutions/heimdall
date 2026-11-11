@@ -1,5 +1,6 @@
+import { Inject } from '@nestjs/common';
 import { Command, Option } from 'nest-commander';
-import { LogLevel, OutputFormat } from '@heimdall/core';
+import { BUILD_IDENTITY, LogLevel, OutputFormat, type IBuildIdentity } from '@heimdall/core';
 import { Calibrator, EvalService, spawnCli } from '@heimdall/evals';
 import { CliConfigService } from '../../config/cli-config.service';
 import type { CliFlags } from '../../config/cli-config.model';
@@ -31,6 +32,7 @@ export class EvalCommand extends HeimdallCommand {
     private readonly configService: CliConfigService,
     private readonly evals: EvalService,
     private readonly calibrator: Calibrator,
+    @Inject(BUILD_IDENTITY) private readonly build: IBuildIdentity,
   ) {
     super(streams);
   }
@@ -94,6 +96,7 @@ export class EvalCommand extends HeimdallCommand {
       );
     }
     const scorecard = await this.evals.run({
+      heimdall: this.build,
       cases: cases.map(({ name }) => name),
       repeat,
       // The CLI that runs this command runs each case, from the same working directory and .env.

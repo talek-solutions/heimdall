@@ -99,10 +99,12 @@ describe('The published schemas (ADR 0019, ADR 0021)', () => {
     });
 
     for (const name of recorded) {
-      it(`accepts the CI transcript ${name}, with a version 1 report`, () => {
+      it(`accepts the CI transcript ${name}, with a version 1 report and its run identity`, () => {
         const document = ciTranscript(name);
 
         assert.equal(document['outcome'].report.schemaVersion, 1);
+        assert.equal(typeof document['meta'].runId, 'string');
+        assert.equal(document['meta'].commit, null);
         accepts(PublishedSchema.Transcript, document);
         accepts(PublishedSchema.Report, document['outcome'].report);
       });
@@ -321,8 +323,11 @@ describe('The published schemas (ADR 0019, ADR 0021)', () => {
       assert.equal(schemas.validate(PublishedSchema.Transcript, encoded('12')).valid, false);
     });
 
-    it('accepts the identity and link fields that later slices write, and keeps them optional', () => {
-      const document = ciTranscript('error-burst-30s.json');
+    it('accepts the identity and link fields, and keeps them optional', () => {
+      const document = changed(ciTranscript('error-burst-30s.json'), (copy) => {
+        delete copy['meta'].runId;
+        delete copy['meta'].commit;
+      });
       const result = document['outcome'].report.results[0].result as string;
       const identified = changed(document, (copy) => {
         copy['meta'].runId = '0f3c9a52-6d0e-4a1b-9c1d-3b7e2f4a8c10';
@@ -333,6 +338,9 @@ describe('The published schemas (ADR 0019, ADR 0021)', () => {
       const outsideCheckout = changed(document, (copy) => {
         copy['meta'].commit = null;
       });
+      const wrongCommit = changed(document, (copy) => {
+        copy['meta'].commit = 12;
+      });
       const emptyLink = changed(document, (copy) => {
         copy['telemetry'][0].resultIds = [];
       });
@@ -340,6 +348,7 @@ describe('The published schemas (ADR 0019, ADR 0021)', () => {
       assert.equal('runId' in document['meta'], false);
       accepts(PublishedSchema.Transcript, identified);
       accepts(PublishedSchema.Transcript, outsideCheckout);
+      refuses(PublishedSchema.Transcript, wrongCommit, '/meta/commit');
       refuses(PublishedSchema.Transcript, emptyLink, '/telemetry/0/resultIds');
     });
   });

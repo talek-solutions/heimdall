@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
+import { isAtomicTemporary, writeFileAtomic } from '@heimdall/core';
 import type { ITranscriptConfig } from '../config/transcript-config.model';
 import { TranscriptError, TranscriptErrorCode } from '../errors';
 import { decodeTranscript, encodeTranscript } from '../format/transcript.codec';
@@ -12,6 +13,8 @@ import { TRANSCRIPT_CONFIG } from '../transcript.tokens';
 const TRANSCRIPT_FILE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{6}\.json$/;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
+/** A temporary file this old was left by a crash, not by a write still going. */
+const STALE_TEMPORARY_MS = 60 * 60 * 1000;
 
 /** Transcripts on disk: only the owner can read them, and only the newest `keep` stay. */
 @Injectable()
@@ -30,7 +33,7 @@ export class TranscriptStore {
   }
 
   write(file: string, transcript: ITranscript): void {
-    writeFileSync(file, encodeTranscript(transcript), { mode: FILE_MODE });
+    writeFileAtomic(file, encodeTranscript(transcript), { mode: FILE_MODE });
   }
 
   read(file: string): ITranscript {
@@ -54,6 +57,20 @@ export class TranscriptStore {
   private prune(): void {
     for (const name of this.newestFirst().slice(this.config.keep)) {
       rmSync(path.join(this.config.runsDir, name), { force: true });
+    }
+    this.sweepTemporaries();
+  }
+
+  /** A crash between write and rename leaves a temporary file that nothing else removes. */
+  private sweepTemporaries(): void {
+    const stale = Date.now() - STALE_TEMPORARY_MS;
+
+    for (const name of readdirSync(this.config.runsDir).filter(isAtomicTemporary)) {
+      const file = path.join(this.config.runsDir, name);
+
+      if ((statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Infinity) < stale) {
+        rmSync(file, { force: true });
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AgentModule } from '@heimdall/agent';
+import { BUILD_IDENTITY, resolveBuildIdentity } from '@heimdall/core';
 import { LlmModule } from '@heimdall/llm';
 import { HeimdallConfigModule } from '@heimdall/config';
 import { ManifestModule } from '@heimdall/core/manifest';
@@ -18,6 +19,7 @@ import { CliConfigService } from './config/cli-config.service';
 import { ExitCodeContract } from './errors/exit-code-contract.provider';
 import { FixtureModeNotice } from './presentation/fixture-mode.notice';
 import { Streams } from './presentation/streams';
+import { version } from './version';
 
 /**
  * Composition root. Port-to-adapter bindings are decided here and nowhere else,
@@ -41,6 +43,8 @@ import { Streams } from './presentation/streams';
     EvalsModule,
   ],
   providers: [
+    // Asked once, from where this code is, never from the working directory (ADR 0022).
+    { provide: BUILD_IDENTITY, useFactory: () => resolveBuildIdentity(version, __dirname) },
     Streams,
     ExitCodeContract,
     FixtureModeNotice,

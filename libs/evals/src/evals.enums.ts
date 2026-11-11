@@ -1,3 +1,8 @@
+/** The version of the scorecard and of the scoring sheet (ADR 0019). */
+export enum EvalFileVersion {
+  V1 = 1,
+}
+
 /** What the judge scores, 0 to 2 each (`.docs/design/replay-and-evals.md`, The rubric). */
 export enum JudgeDimension {
   Component = 'component',

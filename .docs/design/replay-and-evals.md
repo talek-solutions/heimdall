@@ -47,7 +47,7 @@ written here is a change to that schema, in the same commit.
 | Section | Holds |
 |---|---|
 | `version` | `1`. Replay refuses versions it does not know (`TRANSCRIPT_INVALID`) |
-| `meta` | Heimdall version, `recordedAt`, the command (query, `--env`, `--since`, `--entry`, `--plan-only`), the manifest's content and SHA-256, the datasource modes with the fixture scenario and anchor |
+| `meta` | Heimdall version, `recordedAt`, the command (query, `--env`, `--since`, `--entry`, `--plan-only`), the manifest's content and SHA-256, the datasource modes with the fixture scenario and anchor. Also `runId`, created when the run starts (a replay gets its own), and `commit`, with `dirty: true` when the checkout had uncommitted changes to tracked files ([ADR 0022](../adr/0022-the-commit-comes-from-where-the-code-runs-with-a-dirty-flag.md)) |
 | `environment.variables` | Only `INVESTIGATION_*`, `AGENT_*`, `TELEMETRY_FIXTURE_*` and `*_DATASOURCE_TYPE`. A name that looks like a credential (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`) is dropped even then |
 | `pins` | Values taken from outside the code: `now`, `sources` (URL, timeout, auth scheme and env var names only), `entryChoice`. Each is `{ value }`, or `{ error }` when computing it failed, so a replay fails the same way |
 | `model` | Every model call in order, triage included: the provider-neutral request, then the response or the error. The provider's `raw` response is not kept |

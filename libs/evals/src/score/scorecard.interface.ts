@@ -1,7 +1,7 @@
 import type { ErrorResponse } from '@heimdall/core';
 import type { ConclusionOutcome } from '@heimdall/investigation';
 import type { ICalibrationState } from '../calibration/calibrator';
-import type { EvalRunStatus, JudgeDimension } from '../evals.enums';
+import type { EvalFileVersion, EvalRunStatus, JudgeDimension } from '../evals.enums';
 import type { ICheckResults } from './checks';
 import type { IJudgeScores } from './judge';
 
@@ -30,7 +30,17 @@ export interface IEvalRun {
 }
 
 /** One `heimdall eval`: every run, and whether its judge can be trusted. */
+/** The Heimdall that ran the eval; `dirty` is written only when it is true (ADR 0022). */
+export interface IScorecardBuild {
+  readonly version: string;
+  readonly commit: string | null;
+  readonly dirty?: true | undefined;
+}
+
 export interface IScorecard {
+  /** Absent on scorecards written before ADR 0019 was built. */
+  readonly version?: EvalFileVersion | undefined;
+  readonly heimdall?: IScorecardBuild | undefined;
   readonly startedAt: string;
   /** Where the scorecard and the scoring sheets were written. */
   readonly output: string;

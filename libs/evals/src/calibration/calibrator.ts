@@ -2,10 +2,11 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import { parse, stringify } from 'yaml';
+import { writeFileAtomic } from '@heimdall/core';
 import type { IEvalsConfig } from '../config/evals-config.model';
 import { EvalError, EvalErrorCode } from '../errors';
 import { PRIVATE_FILE_MODE } from '../evals.constants';
-import { CalibrationStatus, JudgeDimension } from '../evals.enums';
+import { CalibrationStatus, JudgeDimension, type EvalFileVersion } from '../evals.enums';
 import { EVALS_CONFIG } from '../evals.tokens';
 import { Judge, type IJudgeInput, type IJudgeScores } from '../score/judge';
 
@@ -18,6 +19,8 @@ const SHEET_FILE = /\.score\.ya?ml$/;
 
 /** A run to be hand-scored: what the judge sees, and blanks for a person to fill in. */
 export interface IScoringSheet {
+  /** Absent on sheets written before ADR 0019 was built. */
+  readonly version?: EvalFileVersion | undefined;
   readonly case: string;
   readonly run: string;
   readonly judgeInput: IJudgeInput;
@@ -110,7 +113,7 @@ export class Calibrator {
   writeSheet(directory: string, name: string, sheet: IScoringSheet): string {
     const file = path.join(directory, `${name}.score.yaml`);
 
-    writeFileSync(
+    writeFileAtomic(
       file,
       `# Hand-score this run: 0, 1 or 2 per dimension (rubric: .docs/design/replay-and-evals.md).\n# Then move it to libs/evals/calibration/ and run heimdall eval --calibrate.\n${stringify(sheet)}`,
       { mode: PRIVATE_FILE_MODE },

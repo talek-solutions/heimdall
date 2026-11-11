@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Inject } from '@nestjs/common';
 import { Command, Option } from 'nest-commander';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import { LogLevel, OutputFormat } from '@heimdall/core';
+import { BUILD_IDENTITY, LogLevel, OutputFormat, type IBuildIdentity } from '@heimdall/core';
 import { HEIMDALL_MANIFEST_PATH, ManifestReader } from '@heimdall/core/manifest';
 import {
   InvestigationEventType,
@@ -24,7 +24,6 @@ import { exitCodeForOutcome, toErrorResponse } from '../../errors/error-exit.map
 import { describeProgress, renderPlan } from '../../presentation/investigation-plan.renderer';
 import { renderReport } from '../../presentation/investigation-report.renderer';
 import { Streams } from '../../presentation/streams';
-import { version } from '../../version';
 import { HeimdallCommand } from '../heimdall.command';
 
 interface InvestigateCommandFlags extends CliFlags {
@@ -60,6 +59,7 @@ export class InvestigateCommand extends HeimdallCommand {
     private readonly executions: InvestigationExecutionService,
     private readonly transcripts: TranscriptSession,
     @Inject(TELEMETRY_DATASOURCE_CONFIG) private readonly datasources: ITelemetryDatasourceConfig,
+    @Inject(BUILD_IDENTITY) private readonly build: IBuildIdentity,
   ) {
     super(streams);
   }
@@ -137,7 +137,9 @@ export class InvestigateCommand extends HeimdallCommand {
       this.transcripts.disable();
     }
     this.transcripts.begin({
-      heimdall: version,
+      heimdall: this.build.version,
+      commit: this.build.commit,
+      dirty: this.build.dirty,
       command: { query, environment: flags.env, since: flags.since, entry: flags.entry, planOnly },
       manifest: readFileSync(this.manifestPath, 'utf8'),
       datasources: this.datasources,

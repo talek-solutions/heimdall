@@ -19,6 +19,12 @@ export interface ITranscriptMeta {
   readonly manifest: { readonly sha256: string; readonly content: string };
   /** Which backends were fixtures, and the scenario and anchor when one was. */
   readonly datasources: unknown;
+  /** Created when the run starts. Absent on transcripts recorded before ADR 0019 was built. */
+  readonly runId?: string | undefined;
+  /** The commit of the Heimdall checkout; `null` outside one (ADR 0022). */
+  readonly commit?: string | null | undefined;
+  /** Written only when the checkout had uncommitted changes. */
+  readonly dirty?: true | undefined;
 }
 
 /** One model call, in order. `raw` provider responses are not kept. */
