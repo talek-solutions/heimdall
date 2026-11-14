@@ -7,8 +7,10 @@ import type { IMetricSeriesData, IMetricsRangeQuery } from './metrics-source.int
 import { withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
 import {
+  describeCall,
   intercept,
   TelemetryOperation,
+  type ITelemetryCallContext,
   type ITelemetrySourceInterceptor,
 } from './telemetry-source.interceptor';
 import { TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
@@ -29,6 +31,7 @@ export class MetricsSource {
   async queryRange(
     source: IConnectorSource,
     request: IMetricsRangeQuery,
+    context?: ITelemetryCallContext,
   ): Promise<IMetricSeriesData[]> {
     const call = {
       operation: TelemetryOperation.MetricsQueryRange,
@@ -42,7 +45,9 @@ export class MetricsSource {
       },
     };
 
-    return intercept(this.interceptor, call, () => this.read(source, request));
+    return intercept(this.interceptor, describeCall(call, context), () =>
+      this.read(source, request),
+    );
   }
 
   private async read(

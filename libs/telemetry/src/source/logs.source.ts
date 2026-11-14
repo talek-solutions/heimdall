@@ -13,8 +13,10 @@ import type { ILogBatch, ILogRecord, ILogsRangeQuery } from './logs-source.inter
 import { maskLineFilters, withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
 import {
+  describeCall,
   intercept,
   TelemetryOperation,
+  type ITelemetryCallContext,
   type ITelemetrySourceInterceptor,
 } from './telemetry-source.interceptor';
 import { REDACTOR, TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
@@ -36,7 +38,11 @@ export class LogsSource {
     private readonly interceptor?: ITelemetrySourceInterceptor,
   ) {}
 
-  async queryRange(source: IConnectorSource, request: ILogsRangeQuery): Promise<ILogBatch> {
+  async queryRange(
+    source: IConnectorSource,
+    request: ILogsRangeQuery,
+    context?: ITelemetryCallContext,
+  ): Promise<ILogBatch> {
     const call = {
       operation: TelemetryOperation.LogsQueryRange,
       source: source.url,
@@ -50,7 +56,9 @@ export class LogsSource {
       },
     };
 
-    return intercept(this.interceptor, call, () => this.read(source, request));
+    return intercept(this.interceptor, describeCall(call, context), () =>
+      this.read(source, request),
+    );
   }
 
   private async read(source: IConnectorSource, request: ILogsRangeQuery): Promise<ILogBatch> {

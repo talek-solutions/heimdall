@@ -51,7 +51,7 @@ written here is a change to that schema, in the same commit.
 | `environment.variables` | Only `INVESTIGATION_*`, `AGENT_*`, `TELEMETRY_FIXTURE_*` and `*_DATASOURCE_TYPE`. A name that looks like a credential (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`) is dropped even then |
 | `pins` | Values taken from outside the code: `now`, `sources` (URL, timeout, auth scheme and env var names only), `entryChoice`. Each is `{ value }`, or `{ error }` when computing it failed, so a replay fails the same way |
 | `model` | Every model call in order, triage included: the provider-neutral request, then the response or the error. The provider's `raw` response is not kept |
-| `telemetry` | Every redacting-source call: operation, source URL, the request as plain JSON, then the redacted result or the error. Sorted by request, so two recordings of a run are equal text |
+| `telemetry` | Every redacting-source call: operation, source URL, the request as plain JSON, `resultIds` (the results the call served, [ADR 0020](../adr/0020-a-recorded-source-call-names-the-results-it-served.md)), then the redacted result or the error. Sorted by request and then by `resultIds`, so two recordings of a run are equal text. A transcript recorded before the link has no `resultIds` |
 | `outcome` | The investigation events (without `concluded`, whose report is below), and the plan, the report or the error |
 
 **Encoding:**
@@ -86,7 +86,7 @@ Inside, the session answers:
 | Call | Matched by | When it is not in the transcript |
 |---|---|---|
 | model | order: call 1, call 2, … | `TRANSCRIPT_REPLAY_EXHAUSTED` |
-| source | operation, source and request, plus an occurrence count (parallel calls finish in any order) | `TRANSCRIPT_REPLAY_MISS` |
+| source | operation, source and request. Among recorded calls with the same three, the one that served the same results answers; without one (a recording from before the link), the next one left does | `TRANSCRIPT_REPLAY_MISS` |
 | pin | key | `TRANSCRIPT_REPLAY_MISS` |
 
 A recorded error is raised again as the same kind of error, so it maps to the same exit code. No
@@ -98,6 +98,7 @@ API key is needed, and nothing reaches a model or a backend.
 |---|---|---|
 | A tool result (the `TOOL` parts the model was sent), compared by call id | fails | fails |
 | A source call not asked again, or one never recorded | fails | fails |
+| A source call asked again for another result than the recording says. Not compared for a call recorded without `resultIds` | fails | fails |
 | The number of model calls | fails | fails |
 | The report, the plan or the error. `usage.elapsedMs`, `traceId` and `transcript` are never compared | fails | fails |
 | Anything else the model was sent: the system prompt, the tool schemas, the messages | reported | fails |

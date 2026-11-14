@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -121,6 +121,99 @@ describe('TranscriptSession', () => {
     assert.equal(outside.store.read(outside.session.finish({}).path ?? '').meta.commit, null);
     assert.match(replayed.meta.runId ?? '', /^[0-9a-f-]{36}$/);
     assert.notEqual(replayed.meta.runId, recorded.meta.runId);
+  });
+
+  it('records the results a source call served, when it fails too (ADR 0020)', async () => {
+    const { session, store } = recorder('linked');
+
+    session.begin(BEGIN);
+    await session.intercept({ ...CALL, resultIds: ['r3'] }, async () => [1]);
+    await assert.rejects(
+      session.intercept({ ...CALL, source: 'http://loki.example', resultIds: ['r4'] }, async () => {
+        throw new LlmError(LlmErrorCode.RATE_LIMITED, 'slow down');
+      }),
+    );
+    await session.intercept({ ...CALL, source: 'http://tempo.example' }, async () => [2]);
+    const { telemetry } = store.read(session.finish({}).path ?? '');
+    const served = Object.fromEntries(
+      telemetry.map(({ source, resultIds }) => [source, resultIds]),
+    );
+
+    assert.deepEqual(served, {
+      'http://prometheus.example': ['r3'],
+      'http://loki.example': ['r4'],
+      'http://tempo.example': undefined,
+    });
+    assert.equal(telemetry.find(({ source }) => source.includes('loki'))?.error?.errorCode, 'LLM_RATE_LIMITED');
+  });
+
+  it('writes two calls with the same request in the same order, whichever finished first', async () => {
+    const text = async (name: string, order: readonly string[]): Promise<string> => {
+      const { session, store } = recorder(name);
+
+      session.begin(BEGIN);
+      for (const result of order) {
+        await session.intercept({ ...CALL, resultIds: [result] }, async () => [result]);
+      }
+      const { path: file = '' } = session.finish({});
+      const { telemetry } = store.read(file);
+
+      assert.ok(readFileSync(file, 'utf8').includes('"resultIds"'));
+      return JSON.stringify(telemetry);
+    };
+
+    assert.equal(await text('tie-forward', ['r2', 'r10']), await text('tie-reverse', ['r10', 'r2']));
+  });
+
+  it('answers each of two equal requests with what its own result was served, and tags the replay with the live call', async () => {
+    const { session, store } = recorder('own-answers');
+    const never = async (): Promise<never> => {
+      throw new Error('a replay reached the source');
+    };
+
+    session.begin(BEGIN);
+    await session.intercept({ ...CALL, resultIds: ['r1'] }, async () => ['for r1']);
+    await session.intercept({ ...CALL, resultIds: ['r2'] }, async () => ['for r2']);
+    const { path: file = '' } = session.finish({});
+    const replay = replayer(file);
+
+    replay.begin(BEGIN);
+    // The live run asks in the other order: each call still gets its own recording back.
+    assert.deepEqual(await replay.intercept({ ...CALL, resultIds: ['r2'] }, never), ['for r2']);
+    assert.deepEqual(await replay.intercept({ ...CALL, resultIds: ['r1'] }, never), ['for r1']);
+    const replayed = store.read(replay.finish({}).path ?? '');
+
+    assert.deepEqual(
+      replayed.telemetry.map(({ resultIds, result }) => [resultIds, result]),
+      [
+        [['r1'], ['for r1']],
+        [['r2'], ['for r2']],
+      ],
+    );
+  });
+
+  it('replays a recording from before the link, and the replay says what each call served', async () => {
+    const { session, store } = recorder('before-link');
+    const never = async (): Promise<never> => {
+      throw new Error('a replay reached the source');
+    };
+
+    session.begin(BEGIN);
+    await session.intercept(CALL, async () => ['first']);
+    await session.intercept(CALL, async () => ['second']);
+    const { path: file = '' } = session.finish({});
+    const replay = replayer(file);
+
+    assert.equal(store.read(file).telemetry.every(({ resultIds }) => resultIds === undefined), true);
+    replay.begin(BEGIN);
+    assert.deepEqual(await replay.intercept({ ...CALL, resultIds: ['r1'] }, never), ['first']);
+    assert.deepEqual(await replay.intercept({ ...CALL, resultIds: ['r2'] }, never), ['second']);
+    const replayed = store.read(replay.finish({}).path ?? '');
+
+    assert.deepEqual(
+      replayed.telemetry.map(({ resultIds }) => resultIds),
+      [['r1'], ['r2']],
+    );
   });
 
   it('pins a value, or the error computing it raised, and replays either', async () => {

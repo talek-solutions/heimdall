@@ -48,6 +48,7 @@ export function compareTranscripts(
     toolResults.differing.length > 0 ||
     telemetry.missing.length > 0 ||
     telemetry.extra.length > 0 ||
+    telemetry.relinked.length > 0 ||
     report.length > 0 ||
     modelCalls.recorded !== modelCalls.replayed ||
     (options.strict && modelInputs.length > 0);
@@ -114,7 +115,38 @@ function compareTelemetry(
     })
     .map(label);
 
-  return { compared: recorded.length, missing, extra };
+  return { compared: recorded.length, missing, extra, relinked: relinked(recorded, replayed) };
+}
+
+/**
+ * Recorded calls whose results the replay did not serve with the same call (ADR 0020). A call
+ * recorded before the link has no results to compare, and is skipped.
+ */
+function relinked(
+  recorded: readonly ITelemetryExchange[],
+  replayed: readonly ITelemetryExchange[],
+): string[] {
+  const served = new Map<string, string[]>();
+
+  for (const exchange of replayed) {
+    const key = keyOf(exchange);
+    served.set(key, [...(served.get(key) ?? []), canonical(exchange.resultIds ?? null)]);
+  }
+  return recorded.flatMap((exchange) => {
+    const again = served.get(keyOf(exchange));
+
+    // A call the replay never made is already reported as missing.
+    if (exchange.resultIds === undefined || again === undefined || again.length === 0) {
+      return [];
+    }
+    const match = again.indexOf(canonical(exchange.resultIds));
+
+    if (match !== -1) {
+      again.splice(match, 1);
+      return [];
+    }
+    return [`${label(exchange)} served ${exchange.resultIds.join(', ')}`];
+  });
 }
 
 /** Each tool result once, by the call it answers: every later request repeats the history. */

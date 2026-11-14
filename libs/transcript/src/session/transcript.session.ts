@@ -52,8 +52,8 @@ interface IReplayState {
   readonly from: ITranscript;
   readonly output: string | undefined;
   llmCursor: number;
+  /** The recorded calls by identity; one is taken out each time it answers a call. */
   readonly telemetry: Map<string, ITelemetryExchange[]>;
-  readonly used: Map<string, number>;
 }
 
 const LLM_CODES: ReadonlySet<string> = new Set(Object.values(LlmErrorCode));
@@ -233,9 +233,8 @@ export class TranscriptSession implements ILLMCallInterceptor, ITelemetrySourceI
       pins: this.pins,
       model: this.model,
       // Parallel tool calls finish in any order; sorted, two recordings of a run are equal text.
-      telemetry: [...this.telemetry].sort((a, b) =>
-        canonical(identity(a)).localeCompare(canonical(identity(b))),
-      ),
+      // Two calls with the same request differ only in the result they served.
+      telemetry: [...this.telemetry].sort((a, b) => sortKey(a).localeCompare(sortKey(b))),
       outcome: { events: this.events, ...snapshot(outcome) },
     };
 
@@ -262,7 +261,7 @@ export class TranscriptSession implements ILLMCallInterceptor, ITelemetrySourceI
       const key = canonical(identity(exchange));
       telemetry.set(key, [...(telemetry.get(key) ?? []), exchange]);
     }
-    return { from: transcript, output, llmCursor: 0, telemetry, used: new Map() };
+    return { from: transcript, output, llmCursor: 0, telemetry };
   }
 
   private replayPin<T>(key: TranscriptPin): T {
@@ -307,11 +306,8 @@ export class TranscriptSession implements ILLMCallInterceptor, ITelemetrySourceI
   }
 
   private async replayTelemetry<T>(replay: IReplayState, call: ITelemetryCall): Promise<T> {
-    const key = canonical(identity(call));
-    const used = replay.used.get(key) ?? 0;
-    const recorded = replay.telemetry.get(key)?.[used];
+    const recorded = take(replay.telemetry.get(canonical(identity(call))) ?? [], call);
 
-    replay.used.set(key, used + 1);
     if (recorded === undefined) {
       const error = new TranscriptError(
         TranscriptErrorCode.ReplayMiss,
@@ -320,7 +316,8 @@ export class TranscriptSession implements ILLMCallInterceptor, ITelemetrySourceI
       this.telemetry.push({ ...snapshot(call), error: error.toResponse() });
       throw error;
     }
-    this.telemetry.push(snapshot(recorded));
+    // The recording answers the call; which result it serves is the live run's to say (ADR 0020).
+    this.telemetry.push(tagged(snapshot(recorded), call.resultIds));
     if (recorded.error !== undefined) {
       throw raise(recorded.error);
     }
@@ -335,9 +332,37 @@ function unpin<T>(pinned: IPinnedValue | undefined): T {
   return snapshot(pinned?.value) as T;
 }
 
-/** What makes two telemetry calls the same call. */
+/** What makes two telemetry calls the same call. The results a call served are not part of it. */
 function identity(call: Pick<ITelemetryCall, 'operation' | 'source' | 'request'>): unknown {
   return { operation: call.operation, source: call.source, request: call.request };
+}
+
+function sortKey(exchange: ITelemetryExchange): string {
+  return `${canonical(identity(exchange))} ${canonical(exchange.resultIds ?? [])}`;
+}
+
+/**
+ * Takes the recorded call that answers a live one out of those with the same identity: the one
+ * that served the same results when there is one, so two equal requests made for two results
+ * each get their own answer back, else the first left (a recording from before the link).
+ */
+function take(
+  recorded: ITelemetryExchange[],
+  call: ITelemetryCall,
+): ITelemetryExchange | undefined {
+  const served = canonical(call.resultIds ?? []);
+  const same = recorded.findIndex((exchange) => canonical(exchange.resultIds ?? []) === served);
+
+  return recorded.splice(same === -1 ? 0 : same, 1)[0];
+}
+
+function tagged(
+  exchange: ITelemetryExchange,
+  resultIds: readonly string[] | undefined,
+): ITelemetryExchange {
+  const { resultIds: _recorded, ...rest } = exchange;
+
+  return resultIds === undefined ? rest : { ...rest, resultIds: [...resultIds] };
 }
 
 function responseOf(error: unknown): ErrorResponse {

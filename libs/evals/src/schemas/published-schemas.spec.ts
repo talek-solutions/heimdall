@@ -110,6 +110,43 @@ describe('The published schemas (ADR 0019, ADR 0021)', () => {
       });
     }
 
+    for (const name of recorded) {
+      it(`${name}: every source call names a result of that run, of the kind its operation serves (ADR 0020)`, () => {
+        const document = ciTranscript(name);
+        const kinds = new Map(
+          (document['outcome'].report.results as Json[]).map((result) => [
+            result['result'] as string,
+            result['kind'] as string,
+          ]),
+        );
+        const serves: Record<string, readonly string[]> = {
+          'metrics.queryRange': ['indicator'],
+          'logs.queryRange': ['logs'],
+          'traces.search': ['traces'],
+          'traces.trace': ['traces', 'trace'],
+        };
+
+        assert.ok(document['telemetry'].length > 0);
+        for (const exchange of document['telemetry'] as Json[]) {
+          const [served, ...others] = (exchange['resultIds'] ?? []) as string[];
+
+          assert.equal(others.length, 0);
+          assert.ok(
+            serves[exchange['operation'] as string]?.includes(kinds.get(served ?? '') ?? ''),
+            `${exchange['operation'] as string} served ${served ?? 'nothing'}`,
+          );
+        }
+      });
+    }
+
+    it('accepts a run recorded before the link: no source call names a result', () => {
+      const document = transcript('report-before-v1.json');
+
+      assert.ok(document['telemetry'].length > 0);
+      assert.ok((document['telemetry'] as Json[]).every((exchange) => !('resultIds' in exchange)));
+      accepts(PublishedSchema.Transcript, document);
+    });
+
     it('accepts a run whose report was recorded before schemaVersion', () => {
       const document = transcript('report-before-v1.json');
       const report = document['outcome'].report as Json;

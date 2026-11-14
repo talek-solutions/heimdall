@@ -22,11 +22,15 @@ export interface IReplayDiff {
     readonly compared: number;
     readonly differing: readonly IToolResultChange[];
   };
-  /** Source calls the replayed run did not make, and ones the recorded run never made. */
+  /**
+   * Source calls the replayed run did not make, ones the recorded run never made, and ones it
+   * made again for other results than the recording says (ADR 0020).
+   */
   readonly telemetry: {
     readonly compared: number;
     readonly missing: readonly string[];
     readonly extra: readonly string[];
+    readonly relinked: readonly string[];
   };
   /** The final report (or error), without timings and the trace id. */
   readonly report: readonly IValueChange[];

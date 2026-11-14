@@ -95,16 +95,22 @@ export class EvidenceRunner {
     }
     const { query, fields, narrowedBy, ignored } = compiled.compiled;
     const limit = this.config.execution.evidence.logSampleLimit;
+    // Every query below, confirmations included, serves this one result (ADR 0020).
+    const servedResult = { resultIds: [id] };
     const read = (range: ITimeWindow, filter: string, size: number) =>
-      this.logsSource.queryRange(logs.source, {
-        query: filter,
-        start: range.start,
-        end: range.end,
-        limit: size,
-        fields,
-        component: target.component.name,
-        signal,
-      });
+      this.logsSource.queryRange(
+        logs.source,
+        {
+          query: filter,
+          start: range.start,
+          end: range.end,
+          limit: size,
+          fields,
+          component: target.component.name,
+          signal,
+        },
+        servedResult,
+      );
     const filter = { contains: target.contains ?? null, narrowedBy, ignored };
     let queries = 0;
 
@@ -199,16 +205,22 @@ export class EvidenceRunner {
     }
     const { query, narrowedBy, ignored } = compiled.compiled;
     const errorQuery = this.traceQl.errors(query);
+    // The searches and the exemplar's fetch all serve this one result (ADR 0020).
+    const servedResult = { resultIds: [id] };
     const search = (range: ITimeWindow, filter: string) =>
-      this.tracesSource.search(traces.source, {
-        query: filter,
-        start: range.start,
-        end: range.end,
-        limit,
-        spansPerSpanSet: SPANS_PER_SPAN_SET,
-        component: target.component.name,
-        signal,
-      });
+      this.tracesSource.search(
+        traces.source,
+        {
+          query: filter,
+          start: range.start,
+          end: range.end,
+          limit,
+          spansPerSpanSet: SPANS_PER_SPAN_SET,
+          component: target.component.name,
+          signal,
+        },
+        servedResult,
+      );
     const sampled = (range: ITimeWindow) =>
       target.errorsOnly
         ? Promise.resolve([])
@@ -236,11 +248,11 @@ export class EvidenceRunner {
       const exemplar =
         exemplarId === undefined
           ? undefined
-          : await this.tracesSource.trace(traces.source, {
-              traceId: exemplarId,
-              component: target.component.name,
-              signal,
-            });
+          : await this.tracesSource.trace(
+              traces.source,
+              { traceId: exemplarId, component: target.component.name, signal },
+              servedResult,
+            );
       queries += exemplar === undefined ? 0 : 1;
       const redaction = mergeRedaction([
         ...batches.map((batch) => batch.redaction),
@@ -299,11 +311,11 @@ export class EvidenceRunner {
       return this.done(session, { ...empty, problem: traces.problem }, 0);
     }
     try {
-      const found = await this.tracesSource.trace(traces.source, {
-        traceId,
-        component: TRACE_COMPONENT,
-        signal,
-      });
+      const found = await this.tracesSource.trace(
+        traces.source,
+        { traceId, component: TRACE_COMPONENT, signal },
+        { resultIds: [id] },
+      );
 
       session.noteDropped(empty.subject, found.redaction.droppedFields);
       return this.done(

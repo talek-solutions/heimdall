@@ -20,8 +20,10 @@ import {
 import { withQuerySpan } from './query-span';
 import { TelemetrySignal, TelemetrySpanAttribute } from './telemetry-source.enums';
 import {
+  describeCall,
   intercept,
   TelemetryOperation,
+  type ITelemetryCallContext,
   type ITelemetrySourceInterceptor,
 } from './telemetry-source.interceptor';
 import { REDACTOR, TELEMETRY_SOURCE_INTERCEPTOR } from './telemetry-source.tokens';
@@ -56,7 +58,11 @@ export class TracesSource {
     private readonly interceptor?: ITelemetrySourceInterceptor,
   ) {}
 
-  async search(source: IConnectorSource, request: ITraceSearchQuery): Promise<ITraceSearchBatch> {
+  async search(
+    source: IConnectorSource,
+    request: ITraceSearchQuery,
+    context?: ITelemetryCallContext,
+  ): Promise<ITraceSearchBatch> {
     const call = {
       operation: TelemetryOperation.TracesSearch,
       source: source.url,
@@ -70,17 +76,25 @@ export class TracesSource {
       },
     };
 
-    return intercept(this.interceptor, call, () => this.searchSource(source, request));
+    return intercept(this.interceptor, describeCall(call, context), () =>
+      this.searchSource(source, request),
+    );
   }
 
-  async trace(source: IConnectorSource, request: ITraceLookup): Promise<ITraceBatch> {
+  async trace(
+    source: IConnectorSource,
+    request: ITraceLookup,
+    context?: ITelemetryCallContext,
+  ): Promise<ITraceBatch> {
     const call = {
       operation: TelemetryOperation.TracesTrace,
       source: source.url,
       request: { traceId: request.traceId, component: request.component },
     };
 
-    return intercept(this.interceptor, call, () => this.traceSource(source, request));
+    return intercept(this.interceptor, describeCall(call, context), () =>
+      this.traceSource(source, request),
+    );
   }
 
   private async searchSource(

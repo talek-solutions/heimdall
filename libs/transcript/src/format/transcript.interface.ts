@@ -42,6 +42,8 @@ export interface ITelemetryExchange {
   readonly request: Readonly<Record<string, unknown>>;
   readonly result?: unknown;
   readonly error?: ErrorResponse | undefined;
+  /** The results this call served (ADR 0020). Absent on a run recorded before the link. */
+  readonly resultIds?: readonly string[] | undefined;
 }
 
 export interface ITranscriptOutcome {

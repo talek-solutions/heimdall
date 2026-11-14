@@ -16,10 +16,11 @@ export function renderReplayDiff(file: string, diff: IReplayDiff): string {
       .flatMap(({ callId, tool, changes }) =>
         details(`${callId}${tool === null ? '' : ` ${tool}`}`, changes),
       ),
-    `telemetry     ${telemetry.compared} compared · ${telemetry.missing.length === 0 && telemetry.extra.length === 0 ? 'identical' : `${telemetry.missing.length} not asked again, ${telemetry.extra.length} never recorded`}`,
+    `telemetry     ${telemetry.compared} compared · ${telemetry.missing.length === 0 && telemetry.extra.length === 0 && telemetry.relinked.length === 0 ? 'identical' : `${telemetry.missing.length} not asked again, ${telemetry.extra.length} never recorded, ${telemetry.relinked.length} asked for another result`}`,
     ...[
       ...telemetry.missing.map((call) => `- ${call}`),
       ...telemetry.extra.map((call) => `+ ${call}`),
+      ...telemetry.relinked.map((call) => `~ ${call}`),
     ]
       .slice(0, SHOWN)
       .map((call) => `                ${call}`),

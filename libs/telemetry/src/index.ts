@@ -30,6 +30,7 @@ export { TelemetrySignal, TelemetrySpanName } from './source/telemetry-source.en
 export {
   TelemetryOperation,
   type ITelemetryCall,
+  type ITelemetryCallContext,
   type ITelemetrySourceInterceptor,
 } from './source/telemetry-source.interceptor';
 export { TELEMETRY_SOURCE_INTERCEPTOR } from './source/telemetry-source.tokens';

@@ -992,6 +992,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -1397,6 +1398,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -1839,6 +1841,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -2236,6 +2239,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -2262,6 +2266,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -2288,6 +2293,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -2314,6 +2320,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -2725,6 +2732,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -3150,6 +3158,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -3576,6 +3585,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -4024,6 +4034,7 @@
         },
         "component": "checkout"
       },
+      "resultIds": ["r23"],
       "result": {
         "records": [
           {
@@ -4426,6 +4437,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -4713,6 +4725,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -5004,6 +5017,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -5285,6 +5299,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -5301,6 +5316,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -5317,6 +5333,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -5333,6 +5350,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -5612,6 +5630,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -5897,6 +5916,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -6174,6 +6194,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -6443,6 +6464,7 @@
         "fields": {"level":"severity","msg":"message"},
         "component": "orders-pg"
       },
+      "resultIds": ["r24"],
       "result": {
         "records": [
           {
@@ -6716,6 +6738,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -6738,6 +6761,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -6760,6 +6784,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -6782,6 +6807,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -6804,6 +6830,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [],
         "redaction": {"records":0,"fieldsDropped":0,"truncated":0,"matches":{},"droppedFields":[]}
@@ -6826,6 +6853,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [
           {
@@ -7181,6 +7209,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [
           {
@@ -7584,6 +7613,7 @@
         },
         "component": "orders-reconcile"
       },
+      "resultIds": ["r22"],
       "result": {
         "records": [
           {
@@ -7950,6 +7980,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r21"],
       "result": [
         {
           "labels": {},
@@ -8209,6 +8240,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r20"],
       "result": [
         {
           "labels": {},
@@ -8468,6 +8500,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r19"],
       "result": [
         {
           "labels": {},
@@ -8727,6 +8760,7 @@
         "stepSeconds": 15,
         "labels": ["db_operation_name","db_collection_name","service"]
       },
+      "resultIds": ["r10"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -8986,6 +9020,7 @@
         "stepSeconds": 15,
         "labels": ["db_operation_name","db_collection_name","service"]
       },
+      "resultIds": ["r9"],
       "result": []
     },
     {
@@ -8998,6 +9033,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r16"],
       "result": []
     },
     {
@@ -9010,6 +9046,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r15"],
       "result": []
     },
     {
@@ -9022,6 +9059,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r14"],
       "result": []
     },
     {
@@ -9034,6 +9072,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r5"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -9293,6 +9332,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r2"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -9552,6 +9592,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r8"],
       "result": [
         {
           "labels": {"service":"inventory"},
@@ -9811,6 +9852,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r13"],
       "result": [
         {
           "labels": {"service":"payments"},
@@ -10070,6 +10112,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r1"],
       "result": [
         {
           "labels": {},
@@ -10329,6 +10372,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r4"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -10588,6 +10632,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r7"],
       "result": [
         {
           "labels": {"service":"inventory"},
@@ -10847,6 +10892,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r12"],
       "result": [
         {
           "labels": {"service":"payments"},
@@ -11106,6 +11152,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r3"],
       "result": [
         {
           "labels": {},
@@ -11365,6 +11412,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r6"],
       "result": [
         {
           "labels": {},
@@ -11624,6 +11672,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r11"],
       "result": [
         {
           "labels": {},
@@ -11883,6 +11932,7 @@
         "stepSeconds": 15,
         "labels": ["service"]
       },
+      "resultIds": ["r18"],
       "result": [
         {
           "labels": {},
@@ -12142,6 +12192,7 @@
         "stepSeconds": 15,
         "labels": ["service"]
       },
+      "resultIds": ["r17"],
       "result": [
         {
           "labels": {},
@@ -12401,6 +12452,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r21"],
       "result": [
         {
           "labels": {},
@@ -12660,6 +12712,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r20"],
       "result": [
         {
           "labels": {},
@@ -12919,6 +12972,7 @@
         "stepSeconds": 15,
         "labels": ["datname"]
       },
+      "resultIds": ["r19"],
       "result": [
         {
           "labels": {},
@@ -13178,6 +13232,7 @@
         "stepSeconds": 15,
         "labels": ["db_operation_name","db_collection_name","service"]
       },
+      "resultIds": ["r10"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -13437,6 +13492,7 @@
         "stepSeconds": 15,
         "labels": ["db_operation_name","db_collection_name","service"]
       },
+      "resultIds": ["r9"],
       "result": []
     },
     {
@@ -13449,6 +13505,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r16"],
       "result": []
     },
     {
@@ -13461,6 +13518,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r15"],
       "result": []
     },
     {
@@ -13473,6 +13531,7 @@
         "stepSeconds": 15,
         "labels": ["http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r14"],
       "result": []
     },
     {
@@ -13485,6 +13544,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r5"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -13744,6 +13804,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r2"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -14003,6 +14064,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r8"],
       "result": [
         {
           "labels": {"service":"inventory"},
@@ -14262,6 +14324,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r13"],
       "result": [
         {
           "labels": {"service":"payments"},
@@ -14521,6 +14584,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r1"],
       "result": [
         {
           "labels": {},
@@ -14780,6 +14844,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r4"],
       "result": [
         {
           "labels": {"service":"checkout"},
@@ -15039,6 +15104,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r7"],
       "result": [
         {
           "labels": {"service":"inventory"},
@@ -15298,6 +15364,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r12"],
       "result": [
         {
           "labels": {"service":"payments"},
@@ -15557,6 +15624,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r3"],
       "result": [
         {
           "labels": {},
@@ -15816,6 +15884,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r6"],
       "result": [
         {
           "labels": {},
@@ -16075,6 +16144,7 @@
         "stepSeconds": 15,
         "labels": ["http_route","http_request_method","http_response_status_code","service"]
       },
+      "resultIds": ["r11"],
       "result": [
         {
           "labels": {},
@@ -16334,6 +16404,7 @@
         "stepSeconds": 15,
         "labels": ["service"]
       },
+      "resultIds": ["r18"],
       "result": [
         {
           "labels": {},
@@ -16593,6 +16664,7 @@
         "stepSeconds": 15,
         "labels": ["service"]
       },
+      "resultIds": ["r17"],
       "result": [
         {
           "labels": {},
@@ -16853,6 +16925,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -17116,6 +17189,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -17379,6 +17453,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -17652,6 +17727,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -17915,6 +17991,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -18180,6 +18257,7 @@
         "spansPerSpanSet": 25,
         "component": "checkout"
       },
+      "resultIds": ["r25"],
       "result": {
         "traces": [
           {
@@ -18446,6 +18524,7 @@
       "operation": "traces.trace",
       "source": "http://tempo.fixture.invalid",
       "request": {"traceId":"48e635fc186d39159afa4d12bea2e72f","component":"checkout"},
+      "resultIds": ["r25"],
       "result": {
         "trace": {
           "traceId": "48e635fc186d39159afa4d12bea2e72f",

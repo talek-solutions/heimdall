@@ -76,6 +76,36 @@ describe('Replaying the committed CI transcripts (replay-and-evals.md, Replay)',
     );
   });
 
+  it('replays a transcript recorded before the link, and the replay names what each call served', async () => {
+    const { file, transcript } = edited((recorded) => ({
+      ...recorded,
+      telemetry: recorded.telemetry.map(({ resultIds: _served, ...exchange }) => exchange),
+    }));
+    const replayed = await replayInProcess(file);
+    const diff = compareTranscripts(transcript, replayed, { strict: true });
+
+    assert.equal(diff.outcome, ReplayOutcome.Matched, JSON.stringify(diff, null, 2));
+    assert.deepEqual(
+      replayed.telemetry.map(({ resultIds }) => resultIds),
+      readTranscript(SMALLEST).telemetry.map(({ resultIds }) => resultIds),
+    );
+  });
+
+  it('fails when a source call is recorded as serving another result', async () => {
+    const { file, transcript } = edited((recorded) => ({
+      ...recorded,
+      telemetry: recorded.telemetry.map((exchange, index) =>
+        index === 0 ? { ...exchange, resultIds: ['r999'] } : exchange,
+      ),
+    }));
+    const diff = compareTranscripts(transcript, await replayInProcess(file), { strict: true });
+
+    assert.equal(diff.outcome, ReplayOutcome.Diverged);
+    assert.equal(diff.telemetry.relinked.length, 1);
+    assert.match(diff.telemetry.relinked[0] ?? '', /served r999$/);
+    assert.deepEqual(diff.toolResults.differing, []);
+  });
+
   it('reports a changed prompt without failing, and fails on it only when strict', async () => {
     const { file, transcript } = edited((recorded) => ({
       ...recorded,

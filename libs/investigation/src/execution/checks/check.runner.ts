@@ -105,18 +105,21 @@ export class CheckRunner {
       signal,
     };
 
+    // Both queries serve this one result; the recording says so (ADR 0020).
+    const servedResult = { resultIds: [id] };
+
     try {
       const [current, baseline] = await Promise.all([
-        this.metrics.queryRange(session.sources.metrics, {
-          ...request,
-          start: window.start,
-          end: window.end,
-        }),
-        this.metrics.queryRange(session.sources.metrics, {
-          ...request,
-          start: window.baselineStart,
-          end: window.start,
-        }),
+        this.metrics.queryRange(
+          session.sources.metrics,
+          { ...request, start: window.start, end: window.end },
+          servedResult,
+        ),
+        this.metrics.queryRange(
+          session.sources.metrics,
+          { ...request, start: window.baselineStart, end: window.start },
+          servedResult,
+        ),
       ]);
       // A backend that did not aggregate returns several series; the most deviant one speaks.
       const candidates = (current.length === 0 ? [{ points: [] }] : current).map(({ points }) => ({
