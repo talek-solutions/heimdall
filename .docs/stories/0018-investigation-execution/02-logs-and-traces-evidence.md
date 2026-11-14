@@ -5,6 +5,7 @@
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) items 2, 4 and 8
 - **Decided in:** [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md),
   [ADR 0008](../../adr/0008-egress-allowlist-and-scrub.md)
+- **Epic:** [bifrost EP-003](../../../../bifrost/.docs/epics/EP-003-heimdall-investigates-on-demand.md)
 
 ## Story
 

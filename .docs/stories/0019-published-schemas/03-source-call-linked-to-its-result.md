@@ -4,6 +4,7 @@
 - **Persona:** Software engineer
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) item 2
 - **Decided in:** [ADR 0020](../../adr/0020-a-recorded-source-call-names-the-results-it-served.md)
+- **Epic:** [bifrost EP-001](../../../../bifrost/.docs/epics/EP-001-read-heimdall-runs-in-a-browser.md)
 - **Defended in:** [SD-001](../../defenses/SD-001-build-the-published-schemas-and-link-source-calls-to-results.md)
 
 ## Story

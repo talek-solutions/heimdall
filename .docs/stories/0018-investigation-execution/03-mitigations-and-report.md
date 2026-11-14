@@ -5,6 +5,7 @@
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) item 3
 - **Decided in:** [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md),
   amendment of 2026-11-01
+- **Epic:** [bifrost EP-003](../../../../bifrost/.docs/epics/EP-003-heimdall-investigates-on-demand.md)
 - **Specified in:** [investigation-report.md](../../schema/investigation-report.md)
 
 ## Story

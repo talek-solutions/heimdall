@@ -5,6 +5,7 @@
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) item 2
 - **Decided in:** [ADR 0019](../../adr/0019-published-schemas-for-transcripts-and-scorecards.md),
   [ADR 0022](../../adr/0022-the-commit-comes-from-where-the-code-runs-with-a-dirty-flag.md)
+- **Epic:** [bifrost EP-001](../../../../bifrost/.docs/epics/EP-001-read-heimdall-runs-in-a-browser.md)
 - **Defended in:** [SD-001](../../defenses/SD-001-build-the-published-schemas-and-link-source-calls-to-results.md)
 
 ## Story

@@ -4,6 +4,7 @@
 - **Persona:** Software engineer, and the platform team running Heimdall
 - **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) items 2 and 8
 - **Decided in:** [ADR 0017](../../adr/0017-agent-runtime-loop-tools-budgets-tracing.md)
+- **Epic:** [bifrost EP-003](../../../../bifrost/.docs/epics/EP-003-heimdall-investigates-on-demand.md)
 
 ## Story
 

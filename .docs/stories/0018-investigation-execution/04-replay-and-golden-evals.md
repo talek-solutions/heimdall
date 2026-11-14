@@ -6,6 +6,7 @@
   quality assurance
 - **Decided in:** [ADR 0007](../../adr/0007-record-replay-and-golden-evals.md),
   [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md)
+- **Epic:** [bifrost EP-003](../../../../bifrost/.docs/epics/EP-003-heimdall-investigates-on-demand.md)
 
 ## Story
 
