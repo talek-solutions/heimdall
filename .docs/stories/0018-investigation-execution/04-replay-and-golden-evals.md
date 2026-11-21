@@ -2,8 +2,8 @@
 
 - **Priority:** Medium
 - **Persona:** Heimdall developer
-- **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) items 1–3, as
-  quality assurance
+- **Advances:** [US-001](../../user-stories/US-001-on-demand-investigation.md) items 1 and 3,
+  as quality assurance
 - **Decided in:** [ADR 0007](../../adr/0007-record-replay-and-golden-evals.md),
   [ADR 0018](../../adr/0018-investigation-execution-on-the-agent-runtime.md)
 - **Epic:** [bifrost EP-003](../../../../bifrost/.docs/epics/EP-003-heimdall-investigates-on-demand.md)
