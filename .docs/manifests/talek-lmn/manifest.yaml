@@ -1,0 +1,587 @@
+apiVersion: heimdall/v1
+kind: System
+metadata:
+  name: talek-lmn
+spec:
+  description: Load-test platform that records runs and dispatches Fargate runners to execute them
+  environments:
+    # No `labels` here on purpose. Environment labels are injected as equality matchers into
+    # every compiled metric selector, and nothing in this stack tags series by environment —
+    # a single `env: local` silently emptied all 34 metric queries of a live investigation.
+    - name: local
+      context: talek-local
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata:
+  name: client
+  system: talek-lmn
+spec:
+  type: frontend
+  description: >-
+    The callers of the API: the web app and the scripts that drive load tests. Emits no
+    telemetry of its own; it is here to anchor the inbound hop of the flow.
+  dependsOn:
+    - name: platform-api
+      target: platform
+      transport: http
+      mode: sync
+      criticality: hard
+      operations:
+        - 'POST /auth/login'
+        - 'GET /run-configurations'
+        - 'POST /runs'
+        - 'GET /runs'
+        - 'POST /reports'
+        - 'GET /reports'
+        - 'GET /reports/:reportId'
+        - 'DELETE /reports/:reportId'
+        - 'POST /config-signatures'
+        - 'GET /public/config-signatures/:signature'
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata:
+  name: platform
+  system: talek-lmn
+spec:
+  type: service
+  description: >-
+    NestJS API on :3002. OTel auto-instrumentation, Prometheus exporter scraped on :9464 as
+    job `platform`, OTLP traces to Tempo, pino logs shipped by promtail.
+  exposes:
+    - { transport: http, route: /auth/login }
+    - { transport: http, route: /run-configurations }
+    - { transport: http, route: /runs }
+    - { transport: http, route: /reports }
+    - { transport: http, route: /reports/:reportId }
+    - { transport: http, route: /config-signatures }
+    - { transport: http, route: /public/config-signatures/:signature }
+  telemetry:
+    # The mapped fields are the only ones that reach the model (ADR 0008). `req.headers`,
+    # `req.query`, `req.params` and `req.remoteAddress` stay unmapped on purpose: the live
+    # lines carry a bearer token and the caller's address in them. `time` stays unmapped too
+    # because Loki already supplies the record's timestamp.
+    #
+    # `req.url` is mapped to `url`, not `route`: pino logs the raw URL with its query string,
+    # while the metric label is a route template. Mapping it as `route` would make a step's
+    # route match silently drop every paginated line; as `url` the match is reported ignored
+    # for logs instead, and the narrowing falls to `method`.
+    logs:
+      selector: '{app="platform"}'
+      fields:
+        level: severity
+        msg: message
+        trace_id: traceId
+        span_id: spanId
+        req.id: requestId
+        req.method: method
+        req.url: url
+        res.statusCode: statusCode
+        responseTime: durationMs
+    metrics:
+      matchers: { job: platform }
+    traces:
+      serviceName: platform
+  metrics:
+    - name: http_server_duration
+      type: histogram
+      unit: milliseconds
+      measures: { inbound: http }
+      labels:
+        http_route: route
+        http_method: method
+        http_status_code: statusCode
+    - name: db_client_operation_duration
+      type: histogram
+      unit: milliseconds
+      measures: { outbound: postgres-main }
+      labels:
+        db_operation_name: operation
+    - name: db_client_connection_pending_requests
+      type: gauge
+      role: saturation
+      description: Callers queued for a pool connection; above zero the pool is exhausted
+    - name: db_client_connection_count
+      type: gauge
+      description: Pool connections by `db_client_connection_state` (used, idle); context, not a check
+    - name: nodejs_eventloop_utilization
+      type: gauge
+      role: saturation
+    - name: v8js_memory_heap_used
+      type: gauge
+      unit: bytes
+      description: Per `v8js_heap_space_name`; summed by the ratio below
+    - name: v8js_memory_heap_limit
+      type: gauge
+      unit: bytes
+  indicators:
+    - metric: http_server_duration
+      role: errors
+      expect: { kind: threshold, max: 0.01 }
+      description: server-error-ratio
+    - metric: http_server_duration
+      role: errors
+      query: >-
+        sum(rate(http_server_duration_count{http_status_code=~"4..",job="platform"}[5m]))
+        / sum(rate(http_server_duration_count{job="platform"}[5m]))
+      expect: { kind: threshold, max: 0.2 }
+      description: >-
+        client-error-ratio. Native: the derived errors ratio hard-codes `5..`, and this system's
+        own rejection path is 429 from the throttler.
+    - metric: http_server_duration
+      role: latency
+      expect: { kind: slo, p95: 100 }
+      description: latency-p95-high
+    - ratio:
+        numerator: v8js_memory_heap_used
+        denominator: v8js_memory_heap_limit
+      role: saturation
+      expect: { kind: threshold, max: 0.9 }
+      description: heap-near-limit
+    - metric: nodejs_eventloop_utilization
+      role: saturation
+      expect: { kind: threshold, max: 0.5 }
+      description: event-loop-saturated
+    - metric: db_client_connection_pending_requests
+      role: saturation
+      expect: { kind: threshold, max: 0 }
+      description: pool-queueing
+  dependsOn:
+    - name: postgres-main
+      target: postgres-main
+      transport: sql
+      mode: sync
+      criticality: hard
+      operations: [START, SELECT, INSERT, COMMIT]
+    - name: report-cache
+      target: redis-cache
+      transport: redis
+      mode: sync
+      criticality: soft
+      role: cache-aside
+      # What `RedisService` actually issues; `hmset()` is an HSET followed by an EXPIRE. The
+      # flow steps below deliberately do not match on these: no span carries
+      # `db.operation.name`, only `db.statement`, which no label semantic maps to.
+      operations: [HMGET, HSET, EXPIRE, DEL]
+      description: >-
+        Report bodies cached in front of Postgres; a miss costs latency, not the request. The
+        client runs in cluster mode off a seed list and discovers the topology itself, so a
+        failover is a redirect it follows rather than an error the platform sees
+    - name: dispatch-ecs-task
+      target: aws-ecs
+      transport: http
+      mode: async
+      criticality: hard
+      operations: [RunTask]
+      config: { completionBudgetSeconds: 300 }
+      description: >-
+        Fired after the response to POST /runs. A failure never surfaces as a 5xx or added
+        latency on the route; the run simply stays queued.
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata:
+  name: postgres-main
+  system: talek-lmn
+spec:
+  type: datastore
+  engine: postgresql
+  description: Primary store for users, configurations, runs and reports; postgres_exporter as `postgres-local`
+  telemetry:
+    metrics:
+      matchers: { instance: postgres-local }
+  dataModel:
+    - { kind: table, name: runs }
+    - { kind: table, name: reports }
+    - { kind: table, name: run_configurations }
+    - { kind: table, name: users }
+  metrics:
+    - { name: pg_up, type: gauge, unit: boolean }
+    - { name: pg_stat_activity_count, type: gauge, role: saturation }
+    - { name: pg_settings_max_connections, type: gauge }
+    - { name: pg_stat_database_deadlocks, type: counter, role: errors }
+  indicators:
+    - metric: pg_up
+      role: saturation
+      expect: { kind: threshold, min: 1 }
+      description: pg-down. The system's top-rank critical signal; it explains platform's 5xx and p95 together
+    - ratio:
+        numerator: pg_stat_activity_count
+        denominator: pg_settings_max_connections
+      role: saturation
+      expect: { kind: threshold, max: 0.5 }
+      description: pg-connection-saturation
+    - metric: pg_stat_database_deadlocks
+      role: errors
+      expect: { kind: threshold, max: 0 }
+      description: pg-deadlocks
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata:
+  name: redis-cache
+  system: talek-lmn
+spec:
+  type: cache
+  engine: redis
+  description: >-
+    Report cache: a six-node cluster, three masters with one replica each, behind a single
+    redis_exporter in multi-target mode. All six scrape as `instance: redis-local`, with
+    `redis_node` telling them apart. Observed through metrics only: its spans carry node IPs, not
+    the logical name. Memory pressure is expected here and is not a check
+  telemetry:
+    metrics:
+      matchers: { instance: redis-local }
+  # The join key is a metrics-only arrangement. The exporter relabels all six nodes to
+  # `instance="redis-local"`, but the spans never collapse: ioredis in cluster mode connects by
+  # the IPs the cluster hands out, so `OTEL_DATASTORE_NAMES`, which maps node hostnames, never
+  # fires. Tempo holds `server.address="postgres-local"` and nothing for Redis, with the nodes
+  # identified only as `net.peer.name=172.28.0.11`-`.16`.
+  #
+  # One component with six members, not six components: the cluster is one dependency of the
+  # platform, which is what `sre/services/platform.yaml` binds and what the exporter relabels to.
+  # `role: node` claims nothing about which node is a master, because roles move — observed here
+  # when the masters went from nodes 1, 2, 3 to nodes 4, 5, 2 within minutes of a restart.
+  #
+  # The members, not the component, carry the liveness check. A component-wide `redis_up` with
+  # `role: saturation` compiles to `max()` over all six series, which reads healthy while a node
+  # is down; narrowed to one member it is a single series, so the same template is exact and the
+  # breach names the node. Measured at 2026-11-24T19:01:47Z with redis-node-1 unreachable:
+  # `max(redis_up{instance="redis-local"})` was 1 while the node-1 member query was 0.
+  topology:
+    mode: cluster
+    members:
+      - name: node-1
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-1 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-1-unreachable
+      - name: node-2
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-2 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-2-unreachable
+      - name: node-3
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-3 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-3-unreachable
+      - name: node-4
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-4 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-4-unreachable
+      - name: node-5
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-5 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-5-unreachable
+      - name: node-6
+        role: node
+        telemetry: { metrics: { matchers: { redis_node: redis-node-6 } } }
+        indicators:
+          - metric: redis_up
+            role: saturation
+            expect: { kind: threshold, min: 1 }
+            description: node-6-unreachable
+  metrics:
+    - { name: redis_up, type: gauge, unit: boolean }
+    - { name: redis_cluster_slots_fail, type: gauge, role: saturation }
+    - { name: redis_evicted_keys_total, type: counter, role: errors }
+    # Context, not checks. `cluster_state` is the operator's confirmation that coverage is lost
+    # and not a second check on the same fault; `known_nodes` would only say that one node still
+    # believes there are six; `connected_slaves` is role-dependent, and a master at zero is an
+    # unreplicated master whose loss is an outage rather than a failover.
+    - { name: redis_cluster_state, type: gauge, unit: boolean }
+    - { name: redis_cluster_known_nodes, type: gauge }
+    - { name: redis_connected_slaves, type: gauge }
+  indicators:
+    - metric: redis_cluster_slots_fail
+      role: saturation
+      expect: { kind: threshold, max: 0 }
+      description: >-
+        redis-cluster-slots-uncovered. The check for the one fault that takes the cache away:
+        a master and its replica lost together leave their slots uncovered and the client gets
+        CLUSTERDOWN for those keys. Losing a single node does not reach it — at the node-1
+        outage above, slot coverage stayed whole — which is why this is a separate check from
+        the members' liveness rather than a consequence of it. An upper bound matches the
+        compiler's `max()`: the worst node's view is the cluster's view
+    - metric: redis_evicted_keys_total
+      role: errors
+      expect: { kind: threshold, max: 0 }
+      description: >-
+        redis-evictions. Summed across the cluster by the counter template, which is the
+        aggregation the catalogue and the Grafana rule both use. Structurally unable to breach
+        on this stack: the nodes run with no `maxmemory`, which is also why the catalogue mutes
+        `redis-memory-pressure`
+---
+apiVersion: heimdall/v1
+kind: Component
+metadata:
+  name: aws-ecs
+  system: talek-lmn
+spec:
+  type: vendor
+  description: >-
+    ECS RunTask on Fargate. No exporter of its own; observed only through platform's own
+    HTTP client histogram, narrowed to the ECS endpoint.
+  telemetry:
+    metrics:
+      matchers:
+        job: platform
+        net_peer_name: ecs.eu-central-1.amazonaws.com
+  metrics:
+    - name: http_client_duration
+      type: histogram
+      unit: milliseconds
+      labels:
+        http_method: method
+        http_status_code: statusCode
+  indicators:
+    - metric: http_client_duration
+      role: throughput
+      expect: { kind: nonZero }
+      description: >-
+        ecs-calls-absent. An async dispatch that stops being attempted is invisible on the
+        route, so absence is the check.
+    - metric: http_client_duration
+      role: errors
+      query: >-
+        sum(rate(http_client_duration_count{http_status_code!~"2..",job="platform",net_peer_name="ecs.eu-central-1.amazonaws.com"}[5m]))
+        / sum(rate(http_client_duration_count{job="platform",net_peer_name="ecs.eu-central-1.amazonaws.com"}[5m]))
+      expect: { kind: threshold, max: 0.05 }
+      description: >-
+        ecs-call-error-ratio. Native: AWS rejects bad or missing credentials with 400, which
+        the derived `5..` ratio cannot see.
+    - metric: http_client_duration
+      role: latency
+      expect: { kind: slo, p95: 2000 }
+      description: ecs-call-latency
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata:
+  name: load-testing
+  system: talek-lmn
+spec:
+  description: Users start load-test runs, which Fargate tasks execute against a target
+  flows: [start-run]
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: start-run
+  system: talek-lmn
+spec:
+  description: POST /runs records the run, then dispatches a Fargate task after the response is sent
+  mode: async
+  propagatesTraceContext: false
+  # `runId` is declared although no log line carries it today: the evidence then reports the
+  # key with no values, which names the gap instead of hiding it. Adding `runId` to the
+  # request-completed line in the platform would close it.
+  correlationKey: runId
+  steps:
+    - dependency: client/platform-api
+      match: { route: /runs, method: POST }
+      description: The caller posts the run; the throttler rejects with 429 past the per-user budget
+    - dependency: platform/postgres-main
+      match: { operation: INSERT }
+      description: The run row is written inside the request
+    - dependency: platform/dispatch-ecs-task
+      description: RunTask is called after the response; its failure leaves the run queued
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata:
+  name: identity
+  system: talek-lmn
+spec:
+  description: Users sign in and receive a token for the API
+  flows: [sign-in]
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: sign-in
+  system: talek-lmn
+spec:
+  description: POST /auth/login verifies the credentials against Postgres and issues a token
+  mode: sync
+  steps:
+    - dependency: client/platform-api
+      match: { route: /auth/login, method: POST }
+    - dependency: platform/postgres-main
+      match: { operation: SELECT }
+      description: The user row is read to verify the password
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata:
+  name: config-delivery
+  system: talek-lmn
+spec:
+  description: >-
+    A run's configuration is handed over out of band. The caller mints a single-use presigned
+    signature, and whoever executes the run redeems it once for the config behind it
+  flows: [fetch-config]
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: fetch-config
+  system: talek-lmn
+spec:
+  # The two hops are minutes apart and in production the redeemer is the dispatched Fargate
+  # task, not the minter. `client` stands in for both callers: that is literally true under
+  # the load tests that drive this route, and there is no reverse dependency declared from
+  # `aws-ecs` back into `platform` to model the task's own call.
+  description: >-
+    POST /config-signatures mints a single-use signature; GET /public/config-signatures/:signature
+    redeems it. Minting and redeeming are separate transactions, so a failure on the second hop
+    says nothing about the first
+  mode: async
+  propagatesTraceContext: false
+  steps:
+    - dependency: client/platform-api
+      match: { route: /config-signatures, method: POST }
+      description: The mint. Guarded by a user JWT, not a PAT
+    - dependency: platform/postgres-main
+      match: { operation: INSERT }
+      description: The signature row is written with `consumed_at` NULL
+    - dependency: client/platform-api
+      match: { route: /public/config-signatures/:signature, method: GET }
+      description: >-
+        The redemption, and the only public route in this system. Every failure here is a 4xx
+        carrying an errorCode: 404 NOT_FOUND, 403 TAMPERED, 410 EXPIRED, 410 ALREADY_CONSUMED.
+        None is a 5xx, so this step's derived error ratio stays empty by construction and the
+        component's native 4xx query is what catches a breach
+    - dependency: platform/postgres-main
+      match: { operation: SELECT }
+      description: >-
+        `findOneBy` on the signature, which runs on every redemption whatever the outcome. The
+        consumed-claim UPDATE that follows it is deliberately not declared, because it is skipped
+        entirely when the signature has already expired, so a step matching it would be empty
+        under the very scenario this flow exists to explain. Note the exporter now does carry
+        `db_operation_name="UPDATE"`, which it did not when this was first written
+---
+apiVersion: heimdall/v1
+kind: Functionality
+metadata:
+  name: reporting
+  system: talek-lmn
+spec:
+  description: >-
+    The CLI publishes a load-test report against a personal access token, and reports are read
+    back through a cache in front of Postgres
+  flows: [publish-report, fetch-report, list-reports, delete-report]
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: publish-report
+  system: talek-lmn
+spec:
+  # Guarded by a PAT scope rather than a user JWT, and rejection is the normal case here: the
+  # measured window holds 105,844 401s against 640 successful 201s. Like `fetch-config`, every
+  # failure on this route is a 4xx, so the step's derived error ratio, which only knows `5..`,
+  # stays empty and the component's native 4xx query is what can see it.
+  description: >-
+    POST /reports stores the report and primes the cache. A PAT scope guards it, and a 401 is its
+    most common outcome by two orders of magnitude
+  mode: sync
+  steps:
+    - dependency: client/platform-api
+      match: { route: /reports, method: POST }
+    - dependency: platform/postgres-main
+      match: { operation: INSERT }
+      description: >-
+        The report row, written inside the request. A unique constraint on `runId` turns a replay
+        into a 409, though no 409 has been observed on this stack
+    - dependency: platform/report-cache
+      description: >-
+        The cache prime, HSET then EXPIRE, after the row is saved. No `match`: nothing can narrow
+        a Redis hop here, so this is a declared blind spot rather than a silently empty filter
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: fetch-report
+  system: talek-lmn
+spec:
+  # The only flow that puts `report-cache` on a step, which is what makes the cluster and its six
+  # members reachable by localisation rather than only as a hop behind `platform`.
+  description: >-
+    GET /reports/:reportId reads the cache first and falls through to Postgres on a miss, where a
+    hit also re-primes the cache. A miss costs latency, never correctness
+  mode: sync
+  steps:
+    - dependency: client/platform-api
+      match: { route: /reports/:reportId, method: GET }
+      description: >-
+        The read. Its own rejection path is the throttler's 429, measured at 8,299 against 31,147
+        successes, so this step's derived `5..` ratio cannot see the route's real failure mode
+    - dependency: platform/report-cache
+      description: >-
+        The HMGET that decides hit or miss. Unmatched and unmeasured: there is no Redis client
+        metric, and the span carries only `db.statement`, so the hit rate is invisible from here
+    - dependency: platform/postgres-main
+      match: { operation: SELECT }
+      description: Reached only on a miss, so its throughput is the miss rate rather than the request rate
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: list-reports
+  system: talek-lmn
+spec:
+  description: >-
+    GET /reports pages a user's reports straight from Postgres, with no cache involved
+  mode: sync
+  steps:
+    - dependency: client/platform-api
+      match: { route: /reports, method: GET }
+      description: >-
+        Barely exercised: two requests in the measured window, both 401, so this step's indicators
+        are declared against a route that has essentially no traffic to read
+    - dependency: platform/postgres-main
+      match: { operation: SELECT }
+      description: '`findAndCount`, which issues the page query and its count'
+---
+apiVersion: heimdall/v1
+kind: Flow
+metadata:
+  name: delete-report
+  system: talek-lmn
+spec:
+  # Declared although nothing on it has ever been observed: `db_operation_name` has no DELETE
+  # series at all and the route has no `http_route` series, so every indicator this flow derives
+  # is empty by construction. It is here to make the API surface complete; read it as a statement
+  # of what should happen, not as a check that can fail.
+  description: >-
+    DELETE /reports/:reportId hard-deletes the row and drops the cache entry. No part of this flow
+    has been observed on this stack
+  mode: sync
+  steps:
+    - dependency: client/platform-api
+      match: { route: /reports/:reportId, method: DELETE }
+    - dependency: platform/postgres-main
+      match: { operation: DELETE }
+      description: '`repo.delete`, a hard delete; no DELETE series exists on the exporter'
+    - dependency: platform/report-cache
+      description: The invalidation, DEL, which runs whether or not the row existed

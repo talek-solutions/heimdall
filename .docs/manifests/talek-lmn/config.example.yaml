@@ -1,0 +1,65 @@
+# Heimdall user config for the talek-lmn local stack (ADR 0013).
+#
+# The config is user-level and one per machine: copy this into `~/.heimdall/config.yaml`, or
+# merge its `sources` and `contexts` into the one already there. Point `HEIMDALL_CONFIG` at
+# this file only to try it without touching your own.
+#
+# The URLs are the ports `talek-lmn-server/src/apps/observability/docker-compose.yml` publishes
+# on the host. Nothing here is a secret: the local stack has no authentication.
+#
+# The Redis cluster added nothing here on purpose. Its six nodes publish host ports 7001-7006,
+# but those are for inspection with `redis-cli` and are not a telemetry backend — Heimdall still
+# reads the cluster through the same Prometheus below, where one multi-target redis_exporter
+# scrapes all six nodes under `instance="redis-local"`.
+version: 1
+kind: Config
+currentContext: talek-local
+
+sources:
+  - alias: talek-prometheus
+    type: prometheus
+    url: http://localhost:9090
+    auth: { scheme: none }
+    timeoutMs: 30000
+    metadata:
+      description: >-
+        Scrapes platform, postgres_exporter and the six-node Redis cluster through one
+        multi-target redis_exporter; Tempo remote-writes span metrics here
+      labels: { env: local, talek.solutions/stack: observability }
+
+  - alias: talek-loki
+    type: loki
+    url: http://localhost:3100
+    auth: { scheme: none }
+    metadata:
+      description: Container logs shipped by promtail, labelled by compose service
+      labels: { env: local, talek.solutions/stack: observability }
+
+  - alias: talek-tempo
+    type: tempo
+    url: http://localhost:3200
+    auth: { scheme: none }
+    metadata:
+      description: Traces from the platform OTLP exporter
+      labels: { env: local, talek.solutions/stack: observability }
+
+contexts:
+  - name: talek-local
+    sources: [talek-prometheus, talek-loki, talek-tempo]
+    metadata:
+      description: The talek-lmn suite running under docker compose on this machine
+      labels: { env: local }
+
+# `defaults` takes only these two. The check cap this manifest needs,
+# `INVESTIGATION_MAX_CHECKS=60`, cannot live here — it is read from the environment, and without it
+# the `reporting` walk plans 49 checks and silently keeps 40. See the README.
+defaults:
+  output: text
+  logLevel: info
+
+redaction:
+  scrubbers: [jwt, awsAccessKey, connectionString, privateKey, email, bearerToken]
+  additionalPatterns:
+    # Personal access tokens minted by the platform: `lmn_pat_` and 32 random bytes as base64url.
+    - name: lmn-pat
+      pattern: 'lmn_pat_[A-Za-z0-9_-]{43}'
